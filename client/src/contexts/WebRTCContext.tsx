@@ -196,6 +196,10 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     const startLocalMedia = async () => {
         try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert("Camera/App access blocked! Access via 'http://localhost' on Mac, or enable 'Insecure origins' flag.");
+                return;
+            }
             const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
             setLocalStream(stream);
 
