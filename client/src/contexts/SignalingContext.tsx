@@ -55,8 +55,9 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     useEffect(() => {
         // Connect to WS
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        // Removed unused 'host' variable
-        const wsUrl = `${protocol}//${window.location.hostname}:8080/ws`;
+        // Allow configuring WS URL via environment variable for production (e.g. separate backend)
+        // Fallback to same-host:8080 for local development if not specified
+        const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${window.location.hostname}:8080/ws`;
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;

@@ -2,11 +2,8 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { useSignaling } from './SignalingContext';
 
 // RTC Config
-const rtcConfig: RTCConfiguration = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-    ],
-};
+// RTC Config moved to state
+
 
 interface WebRTCContextValue {
     localStream: MediaStream | null;
@@ -32,6 +29,57 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
+
+    // RTC Config State
+    const [rtcConfig, setRtcConfig] = useState<RTCConfiguration | null>(null);
+
+    // Fetch ICE Servers on mount
+    useEffect(() => {
+        const fetchIceServers = async () => {
+            try {
+                // In production, this call goes to the same Go server via Nginx proxy or direct
+                let apiUrl = '/api/turn-credentials';
+                const wsUrl = import.meta.env.VITE_WS_URL;
+                if (wsUrl) {
+                    const url = new URL(wsUrl);
+                    url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
+                    url.pathname = '/api/turn-credentials';
+                    apiUrl = url.toString();
+                }
+
+                const res = await fetch(apiUrl);
+                if (res.ok) {
+                    const data = await res.json();
+                    console.log('[WebRTC] Loaded ICE Servers:', data);
+
+                    const servers: RTCIceServer[] = [];
+                    if (data.uris) {
+                        servers.push({
+                            urls: data.uris,
+                            username: data.username,
+                            credential: data.password
+                        });
+                    }
+
+                    setRtcConfig({
+                        iceServers: servers.length > 0 ? servers : [{ urls: 'stun:stun.l.google.com:19302' }]
+                    });
+                } else {
+                    console.warn('[WebRTC] Failed to fetch ICE servers, using default Google STUN');
+                    setRtcConfig({
+                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    });
+                }
+            } catch (err) {
+                console.error('[WebRTC] Error fetching ICE servers:', err);
+                setRtcConfig({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+            }
+        };
+
+        fetchIceServers();
+    }, []);
 
     // Buffer ICE candidates if remote description not set
     const iceBufferRef = useRef<RTCIceCandidateInit[]>([]);
@@ -99,6 +147,10 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
 
     const getOrCreatePC = () => {
+        if (!rtcConfig) {
+            console.warn("getOrCreatePC called before ICE config loaded");
+            throw new Error("Cannot create PC before ICE config is loaded");
+        }
         if (pcRef.current) return pcRef.current;
 
         const pc = new RTCPeerConnection(rtcConfig);
