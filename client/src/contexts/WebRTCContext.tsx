@@ -156,6 +156,12 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                 console.log('[WebRTC] Participant left, cleaning up connection');
                 cleanupPC();
             }
+        } else if (!roomState) {
+            // We left the room completely
+            if (pcRef.current || remoteStream) {
+                console.log('[WebRTC] Room state cleared, cleaning up connection');
+                cleanupPC();
+            }
         }
     }, [roomState, clientId, remoteStream]);
 
