@@ -14,7 +14,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var uuidRegex = regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$")
+var (
+	uuidRegex   = regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$")
+	uuidV4Regex = regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[89abAB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
+)
 
 // Constants
 const (
@@ -27,9 +30,8 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	// Allow all origins for MVP
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		return isOriginAllowed(r)
 	},
 }
 
@@ -50,10 +52,11 @@ type Participant struct {
 }
 
 type Hub struct {
-	rooms    map[string]*Room
-	watchers map[string]map[*Client]bool // roomID -> set of clients
-	mu       sync.RWMutex
-	clients  map[*Client]bool
+	rooms      map[string]*Room
+	watchers   map[string]map[*Client]bool // roomID -> set of clients
+	mu         sync.RWMutex
+	clients    map[*Client]bool
+	turnTokens *TurnTokenStore
 }
 
 type Room struct {
@@ -70,13 +73,15 @@ type Client struct {
 	sid  string
 	cid  string // assigned on join
 	rid  string // current room
+	ip   string
 }
 
-func newHub() *Hub {
+func newHub(turnTokens *TurnTokenStore) *Hub {
 	return &Hub{
-		rooms:    make(map[string]*Room),
-		watchers: make(map[string]map[*Client]bool),
-		clients:  make(map[*Client]bool),
+		rooms:      make(map[string]*Room),
+		watchers:   make(map[string]map[*Client]bool),
+		clients:    make(map[*Client]bool),
+		turnTokens: turnTokens,
 	}
 }
 
@@ -91,8 +96,9 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ip := getClientIP(r)
 	sid := generateID("S-")
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), sid: sid}
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), sid: sid, ip: ip}
 
 	hub.mu.Lock()
 	hub.clients[client] = true
@@ -100,6 +106,19 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 
 	go client.writePump()
 	go client.readPump()
+
+	if hub.turnTokens != nil {
+		token, expiresAt := hub.turnTokens.Issue(client.ip)
+		payload, _ := json.Marshal(map[string]interface{}{
+			"token":     token,
+			"expiresAt": expiresAt.Unix(),
+		})
+		client.sendMessage(Message{
+			V:       1,
+			Type:    "turn_token",
+			Payload: payload,
+		})
+	}
 }
 
 func (c *Client) readPump() {
@@ -218,6 +237,10 @@ func (h *Hub) handleJoin(c *Client, msg Message) {
 
 	if !uuidRegex.MatchString(rid) {
 		c.sendError(rid, "INVALID_ROOM_ID", "Room ID must be a valid UUID")
+		return
+	}
+	if !uuidV4Regex.MatchString(rid) {
+		c.sendError(rid, "INVALID_ROOM_ID", "Room ID must be a UUIDv4")
 		return
 	}
 

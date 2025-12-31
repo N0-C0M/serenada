@@ -21,6 +21,7 @@ interface SignalingContextValue {
     isConnected: boolean;
     clientId: string | null;
     roomState: RoomState | null;
+    turnToken: string | null;
     joinRoom: (roomId: string) => void;
     leaveRoom: () => void;
     endRoom: () => void;
@@ -50,6 +51,7 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const [lastMessage, setLastMessage] = useState<SignalingMessage | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [roomStatuses, setRoomStatuses] = useState<Record<string, number>>({});
+    const [turnToken, setTurnToken] = useState<string | null>(null);
     const { showToast } = useToast();
 
     const listenersRef = useRef<((msg: SignalingMessage) => void)[]>([]);
@@ -104,6 +106,7 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 setIsConnected(false);
                 setClientId(null);
                 setRoomState(null);
+                setTurnToken(null);
                 wsRef.current = null;
                 scheduleReconnect();
             };
@@ -163,6 +166,11 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                                     ...prev,
                                     [msg.payload.rid]: msg.payload.count
                                 }));
+                            }
+                            break;
+                        case 'turn_token':
+                            if (msg.payload?.token) {
+                                setTurnToken(msg.payload.token as string);
                             }
                             break;
                         case 'error':
@@ -252,6 +260,7 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             isConnected,
             clientId,
             roomState,
+            turnToken,
             joinRoom,
             leaveRoom,
             endRoom,

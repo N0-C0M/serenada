@@ -4,6 +4,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -93,12 +94,19 @@ func rateLimitMiddleware(limiter *IPLimiter, next http.HandlerFunc) http.Handler
 }
 
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For first (since we are behind Nginx)
-	forwarded := r.Header.Get("X-Forwarded-For")
-	if forwarded != "" {
-		// X-Forwarded-For can be a comma-separated list
-		ips := strings.Split(forwarded, ",")
-		return strings.TrimSpace(ips[0])
+	trustProxy := strings.EqualFold(os.Getenv("TRUST_PROXY"), "1")
+	if trustProxy {
+		realIP := strings.TrimSpace(r.Header.Get("X-Real-IP"))
+		if realIP != "" {
+			return realIP
+		}
+		// Check X-Forwarded-For first (since we are behind Nginx)
+		forwarded := r.Header.Get("X-Forwarded-For")
+		if forwarded != "" {
+			// X-Forwarded-For can be a comma-separated list
+			ips := strings.Split(forwarded, ",")
+			return strings.TrimSpace(ips[0])
+		}
 	}
 
 	// Fallback to RemoteAddr

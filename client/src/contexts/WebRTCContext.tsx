@@ -25,7 +25,7 @@ export const useWebRTC = () => {
 };
 
 export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-    const { sendMessage, roomState, clientId, isConnected, subscribeToMessages } = useSignaling();
+    const { sendMessage, roomState, clientId, isConnected, subscribeToMessages, turnToken } = useSignaling();
     const { showToast } = useToast();
 
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -49,6 +49,9 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     // Fetch ICE Servers on mount
     useEffect(() => {
+        if (!turnToken) {
+            return;
+        }
         const fetchIceServers = async () => {
             try {
                 // In production, this call goes to the same Go server via Nginx proxy or direct
@@ -61,7 +64,11 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
                     apiUrl = url.toString();
                 }
 
-                const res = await fetch(apiUrl);
+                const res = await fetch(apiUrl, {
+                    headers: {
+                        'X-Turn-Token': turnToken
+                    }
+                });
                 if (res.ok) {
                     const data = await res.json();
                     console.log('[WebRTC] Loaded ICE Servers:', data);
@@ -93,7 +100,7 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         };
 
         fetchIceServers();
-    }, []);
+    }, [turnToken]);
 
     // Buffer ICE candidates if remote description not set
     const iceBufferRef = useRef<RTCIceCandidateInit[]>([]);

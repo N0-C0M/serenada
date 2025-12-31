@@ -8,6 +8,8 @@ services:
       - PORT=8080
       - TURN_SECRET=${TURN_SECRET}
       - TURN_HOST=${TURN_HOST}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
+      - TRUST_PROXY=${TRUST_PROXY}
     restart: unless-stopped
     networks:
       - connected-net
