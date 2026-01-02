@@ -82,6 +82,9 @@ func validateRoomID(roomID string) error {
 	if len(raw) != roomIDTotalBytes {
 		return errors.New("room id is invalid")
 	}
+	if base64.RawURLEncoding.EncodeToString(raw) != roomID {
+		return errors.New("room id is invalid")
+	}
 
 	random := raw[:roomIDRandomBytes]
 	tag := raw[roomIDRandomBytes:]
