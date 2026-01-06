@@ -139,6 +139,10 @@ const deviceCheckHTML = `
                 <span class="value" id="datetime">-</span>
             </div>
             <div class="item">
+                <span class="label">Client IP</span>
+                <span class="value" id="client-ip">{{.ClientIP}}</span>
+            </div>
+            <div class="item">
                 <span class="label">User Agent</span>
                 <span class="value" id="ua">-</span>
             </div>
@@ -549,6 +553,14 @@ func handleDeviceCheck(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error loading template", http.StatusInternalServerError)
 		return
 	}
+	clientIP := getClientIP(r)
+	if clientIP == "" {
+		clientIP = "Unknown"
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	tmpl.Execute(w, nil)
+	tmpl.Execute(w, struct {
+		ClientIP string
+	}{
+		ClientIP: clientIP,
+	})
 }
