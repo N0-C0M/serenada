@@ -1,4 +1,7 @@
 services:
+  app-server:
+    ports:
+      - "127.0.0.1:8080:8080"
   coturn:
     user: "root"
     network_mode: "host"
