@@ -1,4 +1,4 @@
-# Connected
+# Serenada
 
 A simple, privacy-focused 1:1 video calling application built with WebRTC. No accounts, no tracking, just instant video calls.
 
@@ -60,7 +60,7 @@ See [DEPLOY.md](DEPLOY.md) for detailed self-hosting instructions.
 ## Documentation
 
 - [Deployment Guide](DEPLOY.md) – Self-hosting instructions
-- [Protocol Specification](connected_protocol_v1.md) – WebSocket signaling protocol
+- [Protocol Specification](serenada_protocol_v1.md) – WebSocket signaling protocol
 
 ## Technology
 

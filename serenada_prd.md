@@ -1,7 +1,7 @@
-# Product Requirements Document: **Connected**
+# Product Requirements Document: **Serenada**
 
 ## Document info
-- **Product name:** Connected  
+- **Product name:** Serenada  
 - **Doc owner:** You  
 - **Version:** v0.2 (MVP-only)  
 - **Date:** 2025-12-26  
@@ -14,7 +14,7 @@
 Family members need a **frictionless way to start a video call** without installing apps, creating accounts, or navigating complex UIs. The experience should be instant and link-based.
 
 ### 1.2 Proposed solution
-**Connected** is a **single-page web application (SPA)** that enables quick **1:1 video calls** using **WebRTC**, accessible directly from modern browsers on desktop and mobile (especially Android).
+**Serenada** is a **single-page web application (SPA)** that enables quick **1:1 video calls** using **WebRTC**, accessible directly from modern browsers on desktop and mobile (especially Android).
 
 Core interaction:
 - Open the site
@@ -28,7 +28,7 @@ Core interaction:
 ## 2) Goals and non-goals
 
 ### 2.1 Goals
-Connected MVP must:
+Serenada MVP must:
 1. Allow a user to **start a video call with one tap**
 2. Generate a **unique, shareable URL** for each call
 3. Allow another user to **join the same call from a browser**

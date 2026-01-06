@@ -1,6 +1,6 @@
-# Connected Signaling Protocol (WebSocket) — v1
+# Serenada Signaling Protocol (WebSocket) — v1
 
-**Purpose:** Define the signaling protocol used by the Connected SPA and backend signaling service to establish and manage **1:1 WebRTC calls** (rooms) via **WSS**.
+**Purpose:** Define the signaling protocol used by the Serenada SPA and backend signaling service to establish and manage **1:1 WebRTC calls** (rooms) via **WSS**.
 
 **Scope (MVP-only):**
 - Room join/leave
@@ -19,7 +19,7 @@
 ### 1.1 WebSocket endpoint
 - **URL:** `wss://{host}/ws`
 - **Protocol:** WebSocket over TLS (WSS)
-- **Subprotocol:** *(optional but recommended)* `connected.signaling.v1`
+- **Subprotocol:** *(optional but recommended)* `serenada.signaling.v1`
 
 ### 1.2 Connection lifecycle
 - Client opens WSS connection.

@@ -3,7 +3,7 @@ set -e
 
 # Configuration
 VPS_HOST="root@46.224.118.74"
-REMOTE_DIR="/opt/connected"
+REMOTE_DIR="/opt/serenada"
 
 echo "🚀 Starting production deployment..."
 
@@ -37,7 +37,7 @@ ssh "$VPS_HOST" "cd $REMOTE_DIR && \
 echo "✅ Verifying deployment..."
 sleep 3
 ssh "$VPS_HOST" "docker ps"
-curl -sI https://connected.dowhile.fun | head -n 1
+curl -sI https://serenada.app | head -n 1
 
 echo ""
-echo "🎉 Deployment complete! App is live at https://connected.dowhile.fun"
+echo "🎉 Deployment complete! App is live at https://serenada.app"

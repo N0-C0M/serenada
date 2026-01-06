@@ -1,4 +1,4 @@
-module connected/server
+module serenada/server
 
 go 1.23.6
 

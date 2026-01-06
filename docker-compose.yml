@@ -3,7 +3,7 @@ services:
   app-server:
     build:
       context: ./server
-    container_name: connected-server
+    container_name: serenada-server
     environment:
       - PORT=8080
       - STUN_HOST=${STUN_HOST}
@@ -15,12 +15,12 @@ services:
       - TRUST_PROXY=${TRUST_PROXY}
     restart: unless-stopped
     networks:
-      - connected-net
+      - serenada-net
 
   # Coturn Server
   coturn:
     image: coturn/coturn:latest
-    container_name: connected-coturn
+    container_name: serenada-coturn
     restart: unless-stopped
     volumes:
       - ./coturn/turnserver.dev.conf:/etc/coturn/turnserver.conf
@@ -37,16 +37,16 @@ services:
   # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
-    container_name: connected-nginx
+    container_name: serenada-nginx
     ports:
       - "80:80"
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf
-      - ./client/dist:/var/www/connected/dist
+      - ./client/dist:/var/www/serenada/dist
     depends_on:
       - app-server
     networks:
-      - connected-net
+      - serenada-net
 
 networks:
-  connected-net:
+  serenada-net:

@@ -5,7 +5,7 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 const resources = {
     en: {
         translation: {
-            "app_title": "Connected",
+            "app_title": "Serenada",
             "app_subtitle_1": "Simple, instant video calls for everyone.",
             "app_subtitle_2": "No accounts, no downloads.",
             "start_call": "Start Call",
@@ -30,7 +30,7 @@ const resources = {
     },
     ru: {
         translation: {
-            "app_title": "Connected",
+            "app_title": "Serenada",
             "app_subtitle_1": "Видеозвонки для всех.",
             "app_subtitle_2": "Без регистрации, без скачивания.",
             "start_call": "Начать звонок",
@@ -55,7 +55,7 @@ const resources = {
     },
     es: {
         translation: {
-            "app_title": "Connected",
+            "app_title": "Serenada",
             "app_subtitle_1": "Videollamadas simples e instantáneas para todos.",
             "app_subtitle_2": "Sin cuentas, sin descargas.",
             "start_call": "Iniciar llamada",
@@ -80,7 +80,7 @@ const resources = {
     },
     fr: {
         translation: {
-            "app_title": "Connected",
+            "app_title": "Serenada",
             "app_subtitle_1": "Des appels vidéo simples et instantanés pour tous.",
             "app_subtitle_2": "Pas de compte, pas de téléchargement.",
             "start_call": "Démarrer un appel",

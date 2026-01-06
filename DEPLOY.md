@@ -1,11 +1,11 @@
 # Deployment Guide: self-hosted on Hetzner
 
-This guide covers deploying the Connected app on a single linux VPS using Docker Compose. The project is structured to support both local development and production deployment.
+This guide covers deploying the Serenada app on a single linux VPS using Docker Compose. The project is structured to support both local development and production deployment.
 
 ## Prerequisites
 
 1.  **Linux VPS**: Ubuntu 20.04+ recommended.
-2.  **Domain Name**: Pointed to your VPS IP (e.g., `connected.dowhile.fun`).
+2.  **Domain Name**: Pointed to your VPS IP (e.g., `serenada.app`).
 3.  **Docker & Docker Compose**: Installed on the VPS.
 
 ## Local Development
@@ -32,7 +32,7 @@ cp .env.example .env
 Note: `.env` and `.env.production` are ignored by git to protect your secrets.
 
 ```bash
-TURN_HOST=connected.dowhile.fun
+TURN_HOST=serenada.app
 # Generate a secure secret: openssl rand -hex 32
 TURN_SECRET=your_secure_random_secret
 ```
@@ -51,11 +51,11 @@ Ensure the following ports are open on your VPS firewall (e.g., UFW or Hetzner C
 
 ### 3. HTTPS (SSL) Setup
 
-1.  Stop Nginx if running: `docker stop connected-nginx`
+1.  Stop Nginx if running: `docker stop serenada-nginx`
 2.  Install Certbot and generate certificates:
     ```bash
     sudo apt install certbot
-    sudo certbot certonly --standalone -d connected.dowhile.fun
+    sudo certbot certonly --standalone -d serenada.app
     ```
 3.  The certificates are mounted into the Nginx container via `docker-compose.prod.yml`.
 
@@ -76,6 +76,6 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 
 ## Verification
 
-1.  Navigate to `https://connected.dowhile.fun`.
+1.  Navigate to `https://serenada.app`.
 2.  Verify camera/microphone permissions are requested.
 3.  Check logs if issues arise: `docker compose logs -f`.

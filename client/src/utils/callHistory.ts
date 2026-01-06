@@ -4,7 +4,7 @@ export interface RecentCall {
     duration: number; // in seconds
 }
 
-const STORAGE_KEY = 'connected_call_history';
+const STORAGE_KEY = 'serenada_call_history';
 const MAX_RECENT_CALLS = 3;
 const ROOM_ID_REGEX = /^[A-Za-z0-9_-]{27}$/;
 const UUID_REGEX = /^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$/;

@@ -11,7 +11,7 @@ const deviceCheckHTML = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Connected - Device Diagnostics</title>
+    <title>Serenada - Device Diagnostics</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -124,7 +124,7 @@ const deviceCheckHTML = `
     <div class="container">
         <header>
             <h1>Device Diagnostics</h1>
-            <p class="subtitle">Troubleshooting tool for Connected</p>
+            <p class="subtitle">Troubleshooting tool for Serenada</p>
         </header>
 
         <div class="actions">
@@ -471,7 +471,7 @@ const deviceCheckHTML = `
 
         function copyDiagnostics() {
             var btn = document.getElementById('copy-btn');
-            var data = "CONNECTED DIAGNOSTICS DATA\n";
+            var data = "SERENADA DIAGNOSTICS DATA\n";
             data += "===========================\n";
             data += "URL: " + window.location.href + "\n";
             data += "Generated: " + new Date().toString() + "\n\n";
