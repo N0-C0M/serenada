@@ -1,6 +1,8 @@
 services:
   # Go Application Server
   app-server:
+    ports:
+      - "127.0.0.1:8080:8080"
     build:
       context: ./server
     container_name: serenada-server
@@ -14,8 +16,6 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS}
       - TRUST_PROXY=${TRUST_PROXY}
     restart: unless-stopped
-    networks:
-      - serenada-net
 
   # Coturn Server
   coturn:
@@ -29,24 +29,13 @@ services:
       - -c
       - /etc/coturn/turnserver.conf
       - --static-auth-secret=${TURN_SECRET}
-    ports:
-      - "3478:3478/udp"
-      - "3478:3478/tcp"
-      - "49152-49200:49152-49200/udp"
 
   # Nginx Reverse Proxy
   nginx:
     image: nginx:alpine
     container_name: serenada-nginx
-    ports:
-      - "80:80"
     volumes:
       - ./nginx/nginx.dev.conf:/etc/nginx/nginx.conf
       - ./client/dist:/var/www/serenada/dist
     depends_on:
       - app-server
-    networks:
-      - serenada-net
-
-networks:
-  serenada-net:

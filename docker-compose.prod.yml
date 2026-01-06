@@ -12,8 +12,7 @@ services:
       - --static-auth-secret=${TURN_SECRET}
 
   nginx:
-    ports:
-      - "443:443"
+    network_mode: "host"
     volumes:
       - ./nginx/nginx.prod.conf:/etc/nginx/nginx.conf
       - /etc/letsencrypt:/etc/letsencrypt
