@@ -128,6 +128,7 @@ const deviceCheckHTML = `
         </header>
 
         <div class="actions">
+            <a href="/" class="btn btn-secondary" style="text-decoration: none; display: flex; align-items: center; justify-content: center;">Back to Home</a>
             <button class="btn" id="copy-btn" onclick="copyDiagnostics()">Copy Diagnostic Data</button>
             <button class="btn btn-secondary" onclick="window.location.reload()">Refresh</button>
         </div>

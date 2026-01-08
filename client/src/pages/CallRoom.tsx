@@ -286,6 +286,9 @@ const CallRoom: React.FC = () => {
                         <button className="btn-secondary" onClick={copyLink}>
                             <Copy size={16} /> {t('copy_link')}
                         </button>
+                        <button className="btn-secondary" onClick={() => navigate('/')}>
+                            {t('home')}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -344,6 +347,16 @@ const CallRoom: React.FC = () => {
                                     }}
                                 >
                                     {t('copy_link_share')}
+                                </button>
+                                <button
+                                    className="btn-small"
+                                    onClick={() => navigate('/')}
+                                    onPointerUp={event => {
+                                        event.stopPropagation();
+                                        handleControlsInteraction();
+                                    }}
+                                >
+                                    {t('home')}
                                 </button>
                             </>
                         )}
