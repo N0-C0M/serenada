@@ -337,7 +337,7 @@ body {
 .qr-code-container {
   width: 200px;
   height: 200px;
-  padding: 16px 8px 0px;
+  padding: 8px;
   background: #ffffff;
   border-radius: 12px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
