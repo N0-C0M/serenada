@@ -295,7 +295,7 @@ const CallRoom: React.FC = () => {
 
         return (
             <div className="page-container center-content">
-                <div className="card">
+                <div className="card prejoin-card">
                     <h2>{t('ready_to_join')}</h2>
                     <p>{t('room_id')} {roomId}</p>
                     {connectionErrorMessage && (
