@@ -45,7 +45,13 @@ body {
 .home-content {
   width: 100%;
   max-width: 600px;
-  padding: 2rem;
+  padding: 1.5rem;
+}
+
+@media (min-width: 768px) {
+  .home-content {
+    padding: 2rem;
+  }
 }
 
 .title {
@@ -527,8 +533,7 @@ body {
 .recent-calls {
   margin: 3rem auto 0;
   width: 100%;
-  max-width: 500px;
-  padding: 0 1.5rem;
+  max-width: 452px;
   text-align: left;
   animation: fadeIn 0.5s ease;
 }
