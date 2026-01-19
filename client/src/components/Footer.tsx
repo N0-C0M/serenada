@@ -12,6 +12,7 @@ const Footer: React.FC = () => {
     const { t } = useTranslation();
     const { showToast } = useToast();
     const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+    const [isStandalone, setIsStandalone] = useState(false);
 
     useEffect(() => {
         const handler = (e: Event) => {
@@ -21,7 +22,29 @@ const Footer: React.FC = () => {
 
         window.addEventListener('beforeinstallprompt', handler);
 
-        return () => window.removeEventListener('beforeinstallprompt', handler);
+        // Check if running in standalone mode (PWA)
+        const mediaQuery = window.matchMedia('(display-mode: standalone)');
+        setIsStandalone(mediaQuery.matches);
+
+        const handleMediaQueryChange = (e: MediaQueryListEvent) => {
+            setIsStandalone(e.matches);
+        };
+
+        try {
+            mediaQuery.addEventListener('change', handleMediaQueryChange);
+        } catch (e) {
+            // Fallback for older browsers
+            mediaQuery.addListener(handleMediaQueryChange);
+        }
+
+        return () => {
+            window.removeEventListener('beforeinstallprompt', handler);
+            try {
+                mediaQuery.removeEventListener('change', handleMediaQueryChange);
+            } catch (e) {
+                mediaQuery.removeListener(handleMediaQueryChange);
+            }
+        };
     }, []);
 
     const handleInstall = async () => {
@@ -59,10 +82,12 @@ const Footer: React.FC = () => {
                     {t('footer_device_check')}
                 </a>
 
-                <button onClick={handleInstall} className="footer-link">
-                    <Download className="icon" />
-                    {t('footer_install')}
-                </button>
+                {!isStandalone && (
+                    <button onClick={handleInstall} className="footer-link">
+                        <Download className="icon" />
+                        {t('footer_install')}
+                    </button>
+                )}
             </nav>
 
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', opacity: 0.6 }}>
