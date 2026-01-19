@@ -56,8 +56,13 @@ const Footer: React.FC = () => {
             }
         } else {
             const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+            const isMac = /Macintosh/.test(navigator.userAgent);
+            const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent);
+
             if (isIOS) {
                 showToast('info', t('install_ios_prompt'));
+            } else if (isMac && isSafari) {
+                showToast('info', t('install_mac_safari_prompt'));
             } else {
                 showToast('info', t('install_not_supported'));
             }
