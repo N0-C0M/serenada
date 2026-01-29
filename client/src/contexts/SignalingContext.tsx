@@ -12,7 +12,7 @@ interface SignalingContextValue {
     clientId: string | null;
     roomState: RoomState | null;
     turnToken: string | null;
-    joinRoom: (roomId: string) => void;
+    joinRoom: (roomId: string, opts?: { snapshotId?: string }) => void;
     leaveRoom: () => void;
     endRoom: () => void;
     sendMessage: (type: string, payload?: any, to?: string) => void;
@@ -56,6 +56,7 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const transportIdRef = useRef(0);
     const currentRoomIdRef = useRef<string | null>(null);
     const pendingJoinRef = useRef<string | null>(null);
+    const pendingJoinPayloadRef = useRef<{ snapshotId?: string } | null>(null);
     const clientIdRef = useRef<string | null>(null);
     const lastClientIdRef = useRef<string | null>(null);
     const needsRejoinRef = useRef(false);
@@ -179,23 +180,55 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         };
     }, [isConnected, sendMessage]);
 
-    const joinRoom = useCallback((roomId: string) => {
+    const joinRoom = useCallback((roomId: string, opts?: { snapshotId?: string }) => {
         console.log(`[Signaling] joinRoom call for ${roomId}`);
         setError(null);
         needsRejoinRef.current = false;
         currentRoomIdRef.current = roomId;
-        currentRoomIdRef.current = roomId;
         if (transportRef.current && transportRef.current.isOpen()) {
             const payload: any = { capabilities: { trickleIce: true } };
+            if (opts?.snapshotId) {
+                payload.snapshotId = opts.snapshotId;
+            }
             // If we have a previous client ID, send it to help server evict ghosts
             const reconnectCid = clientIdRef.current || lastClientIdRef.current;
             if (reconnectCid) {
                 payload.reconnectCid = reconnectCid;
             }
-            sendMessage('join', payload);
+            let sent = false;
+            const sendJoin = (endpoint?: string) => {
+                if (sent) return;
+                if (endpoint) {
+                    payload.pushEndpoint = endpoint;
+                }
+                sendMessage('join', payload);
+                sent = true;
+            };
+
+            const hasPushSupport =
+                typeof window !== 'undefined' &&
+                'serviceWorker' in navigator &&
+                'PushManager' in window;
+
+            if (hasPushSupport) {
+                const fallbackTimer = window.setTimeout(() => sendJoin(), 250);
+                navigator.serviceWorker.ready
+                    .then((reg) => reg.pushManager.getSubscription())
+                    .then((sub) => {
+                        window.clearTimeout(fallbackTimer);
+                        sendJoin(sub?.endpoint);
+                    })
+                    .catch(() => {
+                        window.clearTimeout(fallbackTimer);
+                        sendJoin();
+                    });
+            } else {
+                sendJoin();
+            }
         } else {
             console.log('[Signaling] Transport not ready, buffering join');
             pendingJoinRef.current = roomId;
+            pendingJoinPayloadRef.current = opts ?? null;
         }
     }, [sendMessage]);
 
@@ -281,8 +314,9 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                     transportConnectedOnceRef.current[targetKind] = true;
                     if (!wasConnected) {
                         if (pendingJoinRef.current) {
-                            joinRoom(pendingJoinRef.current);
+                            joinRoom(pendingJoinRef.current, pendingJoinPayloadRef.current ?? undefined);
                             pendingJoinRef.current = null;
+                            pendingJoinPayloadRef.current = null;
                         } else if (needsRejoinRef.current && currentRoomIdRef.current) {
                             // If we lost the connection mid-call, automatically rejoin
                             console.log(`[Signaling] Auto-rejoining room ${currentRoomIdRef.current}`);

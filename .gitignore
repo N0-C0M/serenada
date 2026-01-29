@@ -16,3 +16,8 @@ server/server
 # OS
 .DS_Store
 coturn/turnserver.prod.conf
+server/data/vapid.json
+server/data/subscriptions.db
+/server/data/snapshots
+nginx/conf.d/legacy.extra
+nginx/nginx.legacy.conf.template
