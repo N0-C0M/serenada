@@ -68,6 +68,12 @@ Serenada expects Let's Encrypt certificates to be located at `/etc/letsencrypt/l
 
 A convenience script is provided for deployment. It uses `envsubst` to process templates, builds the frontend, syncs files via `rsync`, and restarts services via SSH.
 
+> [!WARNING]
+> **Manual Restarts**: If you need to restart services manually on the server, you **MUST** include both compose files.
+> Do NOT run `docker compose up -d`.
+> Run `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d` instead.
+> Omitting the production file will cause the app to revert to development defaults (bridge network) and break connectivity.
+
 From the project root on your local machine:
 ```bash
 ./deploy.sh
