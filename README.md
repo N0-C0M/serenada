@@ -12,7 +12,7 @@ A simple, privacy-focused 1:1 video calling application built with WebRTC. No ac
 - **Resilient signaling** – WebSocket with SSE fallback when WS is blocked
 - **Mobile-friendly** – Works on Android Chrome, iOS Safari, and desktop browsers
 - **Self-hostable** – Run your own instance with full control
-  - **Optional join alerts** – Encrypted push notifications with snapshot previews (opt-in)
+- **Optional join alerts** – Encrypted push notifications with snapshot previews (opt-in)
 
 ## Quick Start
 
