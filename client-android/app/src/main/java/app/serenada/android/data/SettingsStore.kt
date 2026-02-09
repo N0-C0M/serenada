@@ -40,6 +40,18 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean(KEY_BACKGROUND_MODE, value).apply()
         }
 
+    var isDefaultCameraEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DEFAULT_CAMERA_ENABLED, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DEFAULT_CAMERA_ENABLED, value).apply()
+        }
+
+    var isDefaultMicrophoneEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DEFAULT_MIC_ENABLED, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DEFAULT_MIC_ENABLED, value).apply()
+        }
+
     companion object {
         const val DEFAULT_HOST = "serenada.app"
         const val HOST_RU = "serenada-app.ru"
@@ -56,6 +68,8 @@ class SettingsStore(context: Context) {
         private const val KEY_RECONNECT_CID = "reconnect_cid"
         private const val KEY_LANGUAGE = "language"
         private const val KEY_BACKGROUND_MODE = "background_mode"
+        private const val KEY_DEFAULT_CAMERA_ENABLED = "default_camera_enabled"
+        private const val KEY_DEFAULT_MIC_ENABLED = "default_mic_enabled"
 
         fun normalizeLanguage(value: String?): String =
             when (value) {

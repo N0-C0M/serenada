@@ -46,14 +46,13 @@ fun SerenadaAppRoot(
     val uiState by callManager.uiState
     val serverHost by callManager.serverHost
     val selectedLanguage by callManager.selectedLanguage
-    val isBackgroundModeEnabled by callManager.isBackgroundModeEnabled
     val recentCalls by callManager.recentCalls
     val roomStatuses by callManager.roomStatuses
     val context = LocalContext.current
     val showActiveCallScreen =
         uiState.phase == CallPhase.Waiting ||
-                uiState.phase == CallPhase.InCall ||
-                uiState.connectionState == "CONNECTED"
+            uiState.phase == CallPhase.InCall ||
+            uiState.connectionState == "CONNECTED"
 
     var hostInput by rememberSaveable { mutableStateOf(serverHost) }
     var roomInput by rememberSaveable { mutableStateOf("") }
@@ -221,7 +220,6 @@ fun SerenadaAppRoot(
                     SettingsScreen(
                         host = hostInput,
                         selectedLanguage = selectedLanguage,
-                        isBackgroundModeEnabled = isBackgroundModeEnabled,
                         hostError = settingsHostError,
                         isSaving = settingsSaveInProgress,
                         onHostChange = {
@@ -229,7 +227,6 @@ fun SerenadaAppRoot(
                             settingsHostError = null
                         },
                         onLanguageSelect = { callManager.updateLanguage(it) },
-                        onBackgroundModeChange = { callManager.updateBackgroundMode(it) },
                         onSave = {
                             if (settingsSaveInProgress) return@SettingsScreen
                             settingsHostError = null

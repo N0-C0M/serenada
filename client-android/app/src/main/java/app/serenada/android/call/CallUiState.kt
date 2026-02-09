@@ -17,5 +17,6 @@ data class CallUiState(
     val connectionState: String = "NEW",
     val signalingState: String = "STABLE",
     val activeTransport: String? = null,
-    val isFrontCamera: Boolean = true
+    val isFrontCamera: Boolean = true,
+    val isScreenSharing: Boolean = false
 )

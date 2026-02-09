@@ -42,18 +42,57 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.serenada.android.R
 import app.serenada.android.data.SettingsStore
-
+@Composable
+private fun SettingsSwitchRow(
+    label: String,
+    subLabel: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            if (subLabel != null) {
+                Text(
+                    text = subLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
+        )
+    }
+}
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     host: String,
     selectedLanguage: String,
     isBackgroundModeEnabled: Boolean,
+    // New parameters for defaults
+    isDefaultCameraEnabled: Boolean,
+    isDefaultMicrophoneEnabled: Boolean,
     hostError: String?,
     isSaving: Boolean,
     onHostChange: (String) -> Unit,
     onLanguageSelect: (String) -> Unit,
     onBackgroundModeChange: (Boolean) -> Unit,
+    // New callbacks
+    onDefaultCameraChange: (Boolean) -> Unit,
+    onDefaultMicrophoneChange: (Boolean) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -235,6 +274,35 @@ fun SettingsScreen(
                     Switch(
                         checked = isBackgroundModeEnabled,
                         onCheckedChange = onBackgroundModeChange
+                    )
+                    SettingsSwitchRow(
+                        label = "Background Mode",
+                        subLabel = "Keep app running in background",
+                        checked = isBackgroundModeEnabled,
+                        onCheckedChange = onBackgroundModeChange
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Text(
+                        text = "Call Defaults",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+
+                    SettingsSwitchRow(
+                        label = "Camera enabled",
+                        subLabel = "Turn on camera when joining a call",
+                        checked = isDefaultCameraEnabled,
+                        onCheckedChange = onDefaultCameraChange
+                    )
+
+                    SettingsSwitchRow(
+                        label = "Microphone enabled",
+                        subLabel = "Turn on microphone when joining a call",
+                        checked = isDefaultMicrophoneEnabled,
+                        onCheckedChange = onDefaultMicrophoneChange
                     )
                 }
             }
