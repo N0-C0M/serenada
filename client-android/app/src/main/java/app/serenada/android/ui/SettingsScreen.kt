@@ -1,7 +1,6 @@
 package app.serenada.android.ui
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -26,7 +25,6 @@ import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,62 +35,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.serenada.android.R
 import app.serenada.android.data.SettingsStore
-@Composable
-private fun SettingsSwitchRow(
-    label: String,
-    subLabel: String?,
-    checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyLarge
-            )
-            if (subLabel != null) {
-                Text(
-                    text = subLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange
-        )
-    }
-}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     host: String,
     selectedLanguage: String,
-    isBackgroundModeEnabled: Boolean,
-    // New parameters for defaults
-    isDefaultCameraEnabled: Boolean,
-    isDefaultMicrophoneEnabled: Boolean,
     hostError: String?,
     isSaving: Boolean,
     onHostChange: (String) -> Unit,
     onLanguageSelect: (String) -> Unit,
-    onBackgroundModeChange: (Boolean) -> Unit,
-    // New callbacks
-    onDefaultCameraChange: (Boolean) -> Unit,
-    onDefaultMicrophoneChange: (Boolean) -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -108,12 +64,10 @@ fun SettingsScreen(
         ?: languageOptions.first().second
     var languageMenuExpanded by remember { mutableStateOf(false) }
 
+
     val isDefaultHost = host == SettingsStore.DEFAULT_HOST
     val isRuHost = host == SettingsStore.HOST_RU
     val isCustomHost = !isDefaultHost && !isRuHost
-
-
-    val uriHandler = LocalUriHandler.current
 
     Scaffold(
         topBar = {
@@ -147,7 +101,6 @@ fun SettingsScreen(
                     .verticalScroll(rememberScrollState())
             ) {
 
-
                 Text(
                     text = stringResource(R.string.settings_server_host),
                     style = MaterialTheme.typography.titleMedium,
@@ -155,11 +108,13 @@ fun SettingsScreen(
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
 
+
                 HostOptionRow(
                     selected = isDefaultHost,
                     label = "Global (${SettingsStore.DEFAULT_HOST})",
                     onClick = { onHostChange(SettingsStore.DEFAULT_HOST) }
                 )
+
 
                 HostOptionRow(
                     selected = isRuHost,
@@ -167,10 +122,11 @@ fun SettingsScreen(
                     onClick = { onHostChange(SettingsStore.HOST_RU) }
                 )
 
+
                 HostOptionRow(
                     selected = isCustomHost,
                     label = "Custom",
-                    onClick = { }
+                    onClick = {  }
                 )
 
                 OutlinedTextField(
@@ -183,14 +139,6 @@ fun SettingsScreen(
                         .padding(top = 8.dp),
                     singleLine = true
                 )
-
-
-                TextButton(
-                    onClick = { uriHandler.openUri("https://github.com/N0-C0M/serenada") },
-                    modifier = Modifier.align(Alignment.End)
-                ) {
-                    Text("Create custom server")
-                }
 
                 if (!hostError.isNullOrBlank()) {
                     Text(
@@ -241,69 +189,6 @@ fun SettingsScreen(
                             )
                         }
                     }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Text(
-                    text = "General",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onBackgroundModeChange(!isBackgroundModeEnabled) }
-                        .padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Background Mode",
-                            style = MaterialTheme.typography.bodyLarge
-                        )
-                        Text(
-                            text = "Keep app running in background",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = isBackgroundModeEnabled,
-                        onCheckedChange = onBackgroundModeChange
-                    )
-                    SettingsSwitchRow(
-                        label = "Background Mode",
-                        subLabel = "Keep app running in background",
-                        checked = isBackgroundModeEnabled,
-                        onCheckedChange = onBackgroundModeChange
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Text(
-                        text = "Call Defaults",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 8.dp)
-                    )
-
-                    SettingsSwitchRow(
-                        label = "Camera enabled",
-                        subLabel = "Turn on camera when joining a call",
-                        checked = isDefaultCameraEnabled,
-                        onCheckedChange = onDefaultCameraChange
-                    )
-
-                    SettingsSwitchRow(
-                        label = "Microphone enabled",
-                        subLabel = "Turn on microphone when joining a call",
-                        checked = isDefaultMicrophoneEnabled,
-                        onCheckedChange = onDefaultMicrophoneChange
-                    )
                 }
             }
         }
