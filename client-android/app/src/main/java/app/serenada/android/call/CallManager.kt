@@ -196,6 +196,15 @@ class CallManager(context: Context) {
         }
     }
 
+    fun validateServerHost(host: String, onResult: (Result<String>) -> Unit) {
+        val normalized = host.trim().ifBlank { SettingsStore.DEFAULT_HOST }
+        apiClient.validateServerHost(normalized) { result ->
+            handler.post {
+                onResult(result.map { normalized })
+            }
+        }
+    }
+
     fun updateLanguage(language: String) {
         val normalized = SettingsStore.normalizeLanguage(language)
         if (normalized == _selectedLanguage.value) return

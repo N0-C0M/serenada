@@ -102,4 +102,12 @@ The Android in-call camera source cycle (`selfie -> world -> composite`) is full
 
 1.  Navigate to `https://your-domain.com`.
 2.  Verify camera/microphone permissions are requested.
-3.  Check logs if issues arise: `docker compose logs -f`.
+3.  Verify room ID endpoint works (used by clients for call start and Android Settings host validation):
+    ```bash
+    curl -sS https://your-domain.com/api/room-id
+    ```
+    Expected response shape:
+    ```json
+    {"roomId":"..."}
+    ```
+4.  Check logs if issues arise: `docker compose logs -f`.

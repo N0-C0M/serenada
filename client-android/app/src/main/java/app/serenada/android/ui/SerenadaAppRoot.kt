@@ -58,6 +58,8 @@ fun SerenadaAppRoot(
     var roomInput by rememberSaveable { mutableStateOf("") }
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var showSettings by rememberSaveable { mutableStateOf(false) }
+    var settingsHostError by rememberSaveable { mutableStateOf<String?>(null) }
+    var settingsSaveInProgress by rememberSaveable { mutableStateOf(false) }
     var showJoinWithCode by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(serverHost) {
@@ -218,14 +220,35 @@ fun SerenadaAppRoot(
                     SettingsScreen(
                         host = hostInput,
                         selectedLanguage = selectedLanguage,
-                        onHostChange = { hostInput = it },
+                        hostError = settingsHostError,
+                        isSaving = settingsSaveInProgress,
+                        onHostChange = {
+                            hostInput = it
+                            settingsHostError = null
+                        },
                         onLanguageSelect = { callManager.updateLanguage(it) },
                         onSave = {
-                            callManager.updateServerHost(hostInput)
-                            showSettings = false
+                            if (settingsSaveInProgress) return@SettingsScreen
+                            settingsHostError = null
+                            settingsSaveInProgress = true
+                            callManager.validateServerHost(hostInput) { result ->
+                                settingsSaveInProgress = false
+                                result
+                                    .onSuccess { validatedHost ->
+                                        callManager.updateServerHost(validatedHost)
+                                        settingsHostError = null
+                                        showSettings = false
+                                    }
+                                    .onFailure {
+                                        settingsHostError =
+                                            context.getString(R.string.settings_error_invalid_server_host)
+                                    }
+                            }
                         },
                         onCancel = {
                             hostInput = serverHost
+                            settingsHostError = null
+                            settingsSaveInProgress = false
                             showSettings = false
                         }
                     )
@@ -290,7 +313,12 @@ fun SerenadaAppRoot(
                         recentCalls = recentCalls,
                         roomStatuses = roomStatuses,
                         onOpenJoinWithCode = { showJoinWithCode = true },
-                        onOpenSettings = { showSettings = true },
+                        onOpenSettings = {
+                            hostInput = serverHost
+                            settingsHostError = null
+                            settingsSaveInProgress = false
+                            showSettings = true
+                        },
                         onStartCall = {
                             callManager.updateServerHost(hostInput)
                             runWithCallPermissions { callManager.startNewCall() }

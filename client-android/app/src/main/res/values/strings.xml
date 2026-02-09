@@ -12,6 +12,7 @@
     <string name="settings_language_spanish">Spanish</string>
     <string name="settings_language_french">French</string>
     <string name="settings_language_help">Auto uses your device language. Unsupported languages fall back to English.</string>
+    <string name="settings_error_invalid_server_host">This host is unreachable or is not a Serenada server.</string>
 
     <string name="join_enter_code_or_link">Enter a code or link</string>
     <string name="join_settings">Settings</string>

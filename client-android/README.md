@@ -9,7 +9,7 @@ Native Android (Kotlin) client for Serenada 1:1 WebRTC calls. This app mirrors t
 - Recent calls on home (max 3, deduped) with live room occupancy status and long-press remove
 - Deep links for `https://serenada.app/call/*`
 - Foreground service to keep active calls running in the background
-- Settings screen to change server host
+- Settings screen to change server host, with host validation on save
 
 ## Not included (current build)
 - SSE signaling fallback
@@ -143,6 +143,7 @@ adb shell am start -a android.intent.action.VIEW -d "https://serenada.app/call/R
 
 ## Settings
 Server host is configurable in the in-app Settings screen (Join screen → Settings).
+On Save, the app validates `https://<host>/api/room-id` and only persists hosts that respond with the expected Serenada room ID payload.
 
 ## Known limitations
 - WebSocket signaling only

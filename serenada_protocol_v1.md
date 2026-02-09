@@ -523,8 +523,10 @@ For `offer`, `answer`, `ice`:
 
 ## 8. HTTP API
 
-### 8.1 `GET /api/room-id`
+### 8.1 `GET|POST /api/room-id`
 Generates a new room ID.
+
+This endpoint is also suitable for a basic server-host validity probe on clients (for example, Android Settings save validation). A valid Serenada server must return JSON with a non-empty `roomId`.
 
 **Response**
 ```json

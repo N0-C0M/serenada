@@ -13,6 +13,7 @@ import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -35,6 +36,8 @@ import app.serenada.android.data.SettingsStore
 fun SettingsScreen(
     host: String,
     selectedLanguage: String,
+    hostError: String?,
+    isSaving: Boolean,
     onHostChange: (String) -> Unit,
     onLanguageSelect: (String) -> Unit,
     onSave: () -> Unit,
@@ -64,7 +67,7 @@ fun SettingsScreen(
                     }
                 },
                 actions = {
-                    TextButton(onClick = onSave) {
+                    TextButton(onClick = onSave, enabled = !isSaving) {
                         Text(stringResource(R.string.settings_save))
                     }
                 }
@@ -82,8 +85,17 @@ fun SettingsScreen(
                     value = host,
                     onValueChange = onHostChange,
                     label = { Text(stringResource(R.string.settings_server_host)) },
+                    isError = hostError != null,
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (!hostError.isNullOrBlank()) {
+                    Text(
+                        text = hostError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
+                }
                 ExposedDropdownMenuBox(
                     expanded = languageMenuExpanded,
                     onExpandedChange = { languageMenuExpanded = !languageMenuExpanded },

@@ -12,6 +12,7 @@
     <string name="settings_language_spanish">Español</string>
     <string name="settings_language_french">Français</string>
     <string name="settings_language_help">Automático usa el idioma del dispositivo. Los idiomas no compatibles vuelven a inglés.</string>
+    <string name="settings_error_invalid_server_host">Este host no responde o no parece un servidor Serenada.</string>
 
     <string name="join_enter_code_or_link">Introduce un código o enlace</string>
     <string name="join_settings">Ajustes</string>
