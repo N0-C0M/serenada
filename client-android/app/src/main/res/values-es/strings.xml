@@ -2,6 +2,7 @@
     <string name="app_name">Serenada</string>
     <string name="common_back">Atrás</string>
 
+    <string name="create_custom_server">Сreate custom server</string>
     <string name="settings_title">Ajustes</string>
     <string name="settings_save">Guardar</string>
     <string name="settings_server_host">Servidor</string>
@@ -59,4 +60,10 @@
     <string name="notification_call_status_channel">Estado de llamada</string>
     <string name="notification_room">Sala %1$s</string>
     <string name="notification_in_call">En llamada</string>
+
+    <string name="custom">Сustom</string>
+    <string name="camera_enabled">Camera enabled</string>
+    <string name="camera_enabled_info">Camera enabled</string>
+    <string name="microphone_enabled">Microphone enabled</string>
+    <string name="microphone_enabled_info">Turn on microphone when joining a call</string>
 </resources>

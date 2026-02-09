@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
@@ -23,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
@@ -34,6 +37,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,6 +46,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.serenada.android.R
 import app.serenada.android.data.SettingsStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.net.HttpURLConnection
+import java.net.URL
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,8 +85,10 @@ fun SettingsScreen(
     val isRuHost = host == SettingsStore.HOST_RU
     val isCustomHost = !isDefaultHost && !isRuHost
 
-
     val uriHandler = LocalUriHandler.current
+    val scope = rememberCoroutineScope()
+    var pingResult by remember { mutableStateOf<String?>(null) }
+    var isPinging by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -112,7 +122,6 @@ fun SettingsScreen(
                     .verticalScroll(rememberScrollState())
             ) {
 
-
                 Text(
                     text = stringResource(R.string.settings_server_host),
                     style = MaterialTheme.typography.titleMedium,
@@ -134,7 +143,7 @@ fun SettingsScreen(
 
                 HostOptionRow(
                     selected = isCustomHost,
-                    label = "Custom",
+                    label = stringResource(R.string.custom),
                     onClick = { }
                 )
 
@@ -149,12 +158,77 @@ fun SettingsScreen(
                     singleLine = true
                 )
 
+                // Connection Tools Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                isPinging = true
+                                pingResult = null
+                                try {
+                                    val targetUrl = if (host.startsWith("http")) host else "https://$host"
+                                    val start = System.currentTimeMillis()
+                                    val connection = URL(targetUrl).openConnection() as HttpURLConnection
+                                    connection.connectTimeout = 3000
+                                    connection.readTimeout = 3000
+                                    connection.requestMethod = "HEAD"
+                                    connection.connect() // Connect explicitly
+                                    val responseCode = connection.responseCode // Trigger request
+                                    val end = System.currentTimeMillis()
+                                    pingResult = "${end - start} ms"
+                                    connection.disconnect()
+                                } catch (e: Exception) {
+                                    pingResult = "Error"
+                                    e.printStackTrace()
+                                } finally {
+                                    isPinging = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = !isPinging
+                    ) {
+                        if (isPinging) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text("Ping")
+                        }
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val targetUrl = if (host.startsWith("http")) "$host/device-check" else "https://$host/device-check"
+                            uriHandler.openUri(targetUrl)
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Device Check")
+                    }
+                }
+
+                if (pingResult != null) {
+                    Text(
+                        text = "Latency: $pingResult",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (pingResult == "Error") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp)
+                    )
+                }
 
                 TextButton(
                     onClick = { uriHandler.openUri("https://github.com/N0-C0M/serenada") },
                     modifier = Modifier.align(Alignment.End)
                 ) {
-                    Text("Create custom server")
+                    Text(stringResource(R.string.create_custom_server))
                 }
 
                 if (!hostError.isNullOrBlank()) {
@@ -167,7 +241,6 @@ fun SettingsScreen(
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
-
 
                 Text(
                     text = stringResource(R.string.settings_language),
@@ -217,8 +290,6 @@ fun SettingsScreen(
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
 
-
-
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Text(
@@ -229,15 +300,15 @@ fun SettingsScreen(
                 )
 
                 SettingsSwitchRow(
-                    label = "Camera enabled",
-                    subLabel = "Turn on camera when joining a call",
+                    label = stringResource(R.string.camera_enabled),
+                    subLabel = stringResource(R.string.camera_enabled_info),
                     checked = isDefaultCameraEnabled,
                     onCheckedChange = onDefaultCameraChange
                 )
 
                 SettingsSwitchRow(
-                    label = "Microphone enabled",
-                    subLabel = "Turn on microphone when joining a call",
+                    label = stringResource(R.string.microphone_enabled),
+                    subLabel = stringResource(R.string.microphone_enabled_info),
                     checked = isDefaultMicrophoneEnabled,
                     onCheckedChange = onDefaultMicrophoneChange
                 )

@@ -52,6 +52,7 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean(KEY_DEFAULT_MIC_ENABLED, value).apply()
         }
 
+
     companion object {
         const val DEFAULT_HOST = "serenada.app"
         const val HOST_RU = "serenada-app.ru"
