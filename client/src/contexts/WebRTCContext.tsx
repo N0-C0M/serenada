@@ -655,14 +655,9 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             }
             isMakingOfferRef.current = true;
             const offer = await pc.createOffer(options);
-
-            // Force/Prefer VP8 for compatibility with older Android devices
-            const sdpWithVP8 = forceVP8(offer.sdp);
-            const offerWithVP8 = { type: offer.type, sdp: sdpWithVP8 };
-
-            await pc.setLocalDescription(offerWithVP8 as RTCSessionDescriptionInit);
-            console.log('[WebRTC] Sending offer (VP8 preferred)');
-            sendMessage('offer', { sdp: offerWithVP8.sdp });
+            await pc.setLocalDescription(offer as RTCSessionDescriptionInit);
+            console.log('[WebRTC] Sending offer');
+            sendMessage('offer', { sdp: offer.sdp });
             clearOfferTimeout();
             offerTimeoutRef.current = window.setTimeout(() => {
                 const currentPc = pcRef.current;
@@ -762,44 +757,3 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         </WebRTCContext.Provider>
     );
 };
-
-// Helper to prioritize VP8 in SDP
-function forceVP8(sdp: string | undefined): string | undefined {
-    if (!sdp) return sdp;
-    try {
-        const sdpLines = sdp.split('\r\n');
-        const mLineIndex = sdpLines.findIndex(line => line.startsWith('m=video'));
-        if (mLineIndex === -1) return sdp;
-
-        const mLine = sdpLines[mLineIndex];
-        const elements = mLine.split(' ');
-        const ptList = elements.slice(3); // Payload types
-
-        // Find VP8 payload types
-        const vp8Pts: string[] = [];
-        sdpLines.forEach(line => {
-            if (line.startsWith('a=rtpmap:')) {
-                const parts = line.substring(9).split(' ');
-                const pt = parts[0];
-                const name = parts[1].split('/')[0];
-                if (name.toUpperCase() === 'VP8') {
-                    vp8Pts.push(pt);
-                }
-            }
-        });
-
-        if (vp8Pts.length === 0) return sdp;
-
-        // Reorder: VP8 first
-        const newPtList = [
-            ...vp8Pts,
-            ...ptList.filter(pt => !vp8Pts.includes(pt))
-        ];
-
-        sdpLines[mLineIndex] = `${elements.slice(0, 3).join(' ')} ${newPtList.join(' ')}`;
-        return sdpLines.join('\r\n');
-    } catch (e) {
-        console.warn("Retaining original SDP due to parsing error", e);
-        return sdp;
-    }
-}

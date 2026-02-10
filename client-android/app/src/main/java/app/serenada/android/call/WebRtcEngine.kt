@@ -3,13 +3,19 @@ package app.serenada.android.call
 import android.content.Intent
 import android.content.Context
 import android.hardware.camera2.CameraManager
+import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjection
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.DisplayMetrics
 import android.util.Log
 import java.util.Collections
 import java.util.WeakHashMap
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.roundToInt
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
 import org.webrtc.Camera2Enumerator
@@ -22,6 +28,7 @@ import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.RendererCommon
+import org.webrtc.RtpParameters
 import org.webrtc.RtpTransceiver
 import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SessionDescription
@@ -52,7 +59,28 @@ class WebRtcEngine(
 
     private data class CapturerSelection(
         val capturer: VideoCapturer,
-        val isFrontFacing: Boolean
+        val isFrontFacing: Boolean,
+        val captureProfile: CaptureProfile
+    )
+
+    private data class CaptureProfile(
+        val width: Int,
+        val height: Int,
+        val fps: Int
+    )
+
+    private data class CapturePolicy(
+        val targetWidth: Int,
+        val targetHeight: Int,
+        val targetFps: Int,
+        val minFps: Int
+    )
+
+    private data class VideoSenderPolicy(
+        val maxBitrateBps: Int,
+        val minBitrateBps: Int,
+        val maxFramerate: Int,
+        val degradationPreference: RtpParameters.DegradationPreference
     )
 
     private val appContext = context.applicationContext
@@ -239,12 +267,10 @@ class WebRtcEngine(
                     onComplete?.invoke(false)
                     return
                 }
-                val mungedSdp = forceVp8(desc.description)
-                val finalDesc = SessionDescription(desc.type, mungedSdp)
                 pc.setLocalDescription(object : SdpObserverAdapter() {
                     override fun onSetSuccess() {
                         Log.d("WebRtcEngine", "Local description set (offer)")
-                        onSdp(finalDesc.description)
+                        onSdp(desc.description)
                         onComplete?.invoke(true)
                     }
 
@@ -252,7 +278,7 @@ class WebRtcEngine(
                         Log.w("WebRtcEngine", "Failed to set local offer: $error")
                         onComplete?.invoke(false)
                     }
-                }, finalDesc)
+                }, desc)
             }
 
             override fun onCreateFailure(error: String?) {
@@ -344,13 +370,19 @@ class WebRtcEngine(
             }
         })
         val textureHelper = SurfaceTextureHelper.create("ScreenCaptureThread", eglBase.eglBaseContext)
+        val captureProfile = selectScreenShareCaptureProfile()
         return try {
             capturer.initialize(textureHelper, appContext, observer)
-            capturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS)
+            capturer.startCapture(captureProfile.width, captureProfile.height, captureProfile.fps)
             videoCapturer = capturer
             surfaceTextureHelper = textureHelper
             cameraSourceBeforeScreenShare = previousSource
             isScreenSharing = true
+            applyVideoSenderParameters()
+            Log.d(
+                "WebRtcEngine",
+                "Screen share capture profile: ${captureProfile.width}x${captureProfile.height}@${captureProfile.fps}fps"
+            )
             onCameraFacingChanged(false)
             true
         } catch (e: Exception) {
@@ -539,6 +571,7 @@ class WebRtcEngine(
             localVideoTrack?.let { pc.addTrack(it, listOf("serenada")) }
             ensureReceiveTransceivers(pc)
             applyAudioSenderParameters(pc)
+            applyVideoSenderParameters(pc)
         }
     }
 
@@ -588,36 +621,25 @@ class WebRtcEngine(
         }
     }
 
-    private fun forceVp8(sdp: String): String {
-        return try {
-            val lines = sdp.split("\r\n").toMutableList()
-            val mLineIndex = lines.indexOfFirst { it.startsWith("m=video") }
-            if (mLineIndex == -1) return sdp
-            val mLine = lines[mLineIndex]
-            val parts = mLine.split(" ")
-            if (parts.size <= 3) return sdp
-
-            val payloadTypes = parts.drop(3)
-            val vp8Pts = mutableListOf<String>()
-            lines.forEach { line ->
-                if (line.startsWith("a=rtpmap:")) {
-                    val values = line.substring(9).split(" ")
-                    if (values.size >= 2) {
-                        val pt = values[0]
-                        val name = values[1].split("/")[0]
-                        if (name.equals("VP8", ignoreCase = true)) {
-                            vp8Pts.add(pt)
-                        }
-                    }
-                }
-            }
-            if (vp8Pts.isEmpty()) return sdp
-            val newPtList = vp8Pts + payloadTypes.filter { it !in vp8Pts }
-            lines[mLineIndex] = (parts.take(3) + newPtList).joinToString(" ")
-            lines.joinToString("\r\n")
+    private fun applyVideoSenderParameters(pc: PeerConnection? = peerConnection) {
+        val activePc = pc ?: return
+        val sender = activePc.senders.firstOrNull { it.track()?.kind() == "video" } ?: return
+        val policy = activeVideoSenderPolicy()
+        try {
+            val params = sender.parameters
+            val encodings = params.encodings
+            if (encodings.isNullOrEmpty()) return
+            params.degradationPreference = policy.degradationPreference
+            encodings[0].maxBitrateBps = policy.maxBitrateBps
+            encodings[0].minBitrateBps = policy.minBitrateBps
+            encodings[0].maxFramerate = policy.maxFramerate
+            sender.setParameters(params)
+            Log.d(
+                "WebRtcEngine",
+                "Video sender policy applied: max=${policy.maxBitrateBps} min=${policy.minBitrateBps} fps=${policy.maxFramerate} mode=${activeVideoModeLabel()}"
+            )
         } catch (e: Exception) {
-            Log.w("WebRtcEngine", "VP8 SDP munging failed", e)
-            sdp
+            Log.w("WebRtcEngine", "Failed to apply video sender parameters", e)
         }
     }
 
@@ -628,7 +650,11 @@ class WebRtcEngine(
         val textureHelper = SurfaceTextureHelper.create("CaptureThread", eglBase.eglBaseContext)
         try {
             selection.capturer.initialize(textureHelper, appContext, observer)
-            selection.capturer.startCapture(CAPTURE_WIDTH, CAPTURE_HEIGHT, CAPTURE_FPS)
+            selection.capturer.startCapture(
+                selection.captureProfile.width,
+                selection.captureProfile.height,
+                selection.captureProfile.fps
+            )
         } catch (e: Exception) {
             Log.w("WebRtcEngine", "Failed to start capture for $source", e)
             runCatching { selection.capturer.dispose() }
@@ -639,7 +665,11 @@ class WebRtcEngine(
         surfaceTextureHelper = textureHelper
         currentCameraSource = source
         onCameraFacingChanged(selection.isFrontFacing)
-        Log.d("WebRtcEngine", "Camera source active: $source")
+        applyVideoSenderParameters()
+        Log.d(
+            "WebRtcEngine",
+            "Camera source active: $source (${selection.captureProfile.width}x${selection.captureProfile.height}@${selection.captureProfile.fps}fps)"
+        )
         return true
     }
 
@@ -663,11 +693,27 @@ class WebRtcEngine(
             LocalCameraSource.SELFIE -> {
                 if (front != null) {
                     enumerator.createCapturer(front, null)?.let {
-                        CapturerSelection(capturer = it, isFrontFacing = true)
+                        CapturerSelection(
+                            capturer = it,
+                            isFrontFacing = true,
+                            captureProfile = selectCameraCaptureProfile(
+                                enumerator = enumerator,
+                                deviceNames = listOf(front),
+                                policy = cameraCapturePolicyFor(LocalCameraSource.SELFIE)
+                            )
+                        )
                     }
                 } else if (back != null) {
                     enumerator.createCapturer(back, null)?.let {
-                        CapturerSelection(capturer = it, isFrontFacing = false)
+                        CapturerSelection(
+                            capturer = it,
+                            isFrontFacing = false,
+                            captureProfile = selectCameraCaptureProfile(
+                                enumerator = enumerator,
+                                deviceNames = listOf(back),
+                                policy = cameraCapturePolicyFor(LocalCameraSource.SELFIE)
+                            )
+                        )
                     }
                 } else {
                     null
@@ -679,7 +725,15 @@ class WebRtcEngine(
                     null
                 } else {
                     enumerator.createCapturer(back, null)?.let {
-                        CapturerSelection(capturer = it, isFrontFacing = false)
+                        CapturerSelection(
+                            capturer = it,
+                            isFrontFacing = false,
+                            captureProfile = selectCameraCaptureProfile(
+                                enumerator = enumerator,
+                                deviceNames = listOf(back),
+                                policy = cameraCapturePolicyFor(LocalCameraSource.WORLD)
+                            )
+                        )
                     }
                 }
             }
@@ -697,6 +751,11 @@ class WebRtcEngine(
                         overlayCapturer?.dispose()
                         null
                     } else {
+                        val profile = selectCameraCaptureProfile(
+                            enumerator = enumerator,
+                            deviceNames = listOf(back, front),
+                            policy = cameraCapturePolicyFor(LocalCameraSource.COMPOSITE)
+                        )
                         CapturerSelection(
                             capturer = CompositeCameraCapturer(
                                 context = appContext,
@@ -705,12 +764,245 @@ class WebRtcEngine(
                                 overlayCapturer = overlayCapturer,
                                 onStartFailure = { onCompositeStartFailure() }
                             ),
-                            isFrontFacing = false
+                            isFrontFacing = false,
+                            captureProfile = profile
                         )
                     }
                 }
             }
         }
+    }
+
+    private fun cameraCapturePolicyFor(source: LocalCameraSource): CapturePolicy {
+        return when (source) {
+            LocalCameraSource.COMPOSITE -> {
+                CapturePolicy(
+                    targetWidth = COMPOSITE_TARGET_WIDTH,
+                    targetHeight = COMPOSITE_TARGET_HEIGHT,
+                    targetFps = COMPOSITE_TARGET_FPS,
+                    minFps = COMPOSITE_MIN_FPS
+                )
+            }
+
+            else -> {
+                CapturePolicy(
+                    targetWidth = CAMERA_TARGET_WIDTH,
+                    targetHeight = CAMERA_TARGET_HEIGHT,
+                    targetFps = CAMERA_TARGET_FPS,
+                    minFps = CAMERA_MIN_FPS
+                )
+            }
+        }
+    }
+
+    private fun activeVideoModeLabel(): String {
+        if (isScreenSharing) return "screen_share"
+        return when (currentCameraSource) {
+            LocalCameraSource.SELFIE -> "selfie"
+            LocalCameraSource.WORLD -> "world"
+            LocalCameraSource.COMPOSITE -> "composite"
+        }
+    }
+
+    private fun activeVideoSenderPolicy(): VideoSenderPolicy {
+        if (isScreenSharing) {
+            return VideoSenderPolicy(
+                maxBitrateBps = SCREEN_SHARE_MAX_BITRATE_BPS,
+                minBitrateBps = SCREEN_SHARE_MIN_BITRATE_BPS,
+                maxFramerate = SCREEN_SHARE_TARGET_FPS,
+                degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_RESOLUTION
+            )
+        }
+        return when (currentCameraSource) {
+            LocalCameraSource.COMPOSITE -> VideoSenderPolicy(
+                maxBitrateBps = COMPOSITE_MAX_BITRATE_BPS,
+                minBitrateBps = COMPOSITE_MIN_BITRATE_BPS,
+                maxFramerate = COMPOSITE_TARGET_FPS,
+                degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
+            )
+
+            else -> VideoSenderPolicy(
+                maxBitrateBps = CAMERA_MAX_BITRATE_BPS,
+                minBitrateBps = CAMERA_MIN_BITRATE_BPS,
+                maxFramerate = CAMERA_TARGET_FPS,
+                degradationPreference = RtpParameters.DegradationPreference.BALANCED
+            )
+        }
+    }
+
+    private fun selectCameraCaptureProfile(
+        enumerator: Camera2Enumerator,
+        deviceNames: List<String>,
+        policy: CapturePolicy
+    ): CaptureProfile {
+        if (deviceNames.isEmpty()) {
+            return defaultCaptureProfile(policy)
+        }
+        val formatsByDevice = deviceNames.mapNotNull { deviceName ->
+            val bestFpsByResolution = (enumerator.getSupportedFormats(deviceName) ?: emptyList())
+                .groupBy { Pair(it.width, it.height) }
+                .mapValues { (_, formats) ->
+                    formats.maxOfOrNull { format -> normalizeFps(format.framerate.max) } ?: policy.targetFps
+                }
+            if (bestFpsByResolution.isEmpty()) null else bestFpsByResolution
+        }
+        if (formatsByDevice.isEmpty()) {
+            return defaultCaptureProfile(policy)
+        }
+
+        var commonResolutions: Set<Pair<Int, Int>> = formatsByDevice.first().keys
+        formatsByDevice.drop(1).forEach { map ->
+            commonResolutions = commonResolutions.intersect(map.keys)
+        }
+        if (commonResolutions.isNotEmpty()) {
+            val commonFpsByResolution = commonResolutions.associateWith { size ->
+                formatsByDevice.minOf { formatMap ->
+                    formatMap[size] ?: policy.targetFps
+                }
+            }
+            chooseProfileForPolicy(commonFpsByResolution, policy)?.let { return it }
+        }
+
+        val perDeviceProfiles = formatsByDevice.mapNotNull { map ->
+            chooseProfileForPolicy(map, policy)
+        }
+        if (perDeviceProfiles.isNotEmpty()) {
+            return CaptureProfile(
+                width = perDeviceProfiles.minOf { it.width },
+                height = perDeviceProfiles.minOf { it.height },
+                fps = perDeviceProfiles.minOf { it.fps }
+            )
+        }
+
+        return defaultCaptureProfile(policy)
+    }
+
+    private fun chooseProfileForPolicy(
+        fpsByResolution: Map<Pair<Int, Int>, Int>,
+        policy: CapturePolicy
+    ): CaptureProfile? {
+        val profiles = fpsByResolution.map { (size, fps) ->
+            CaptureProfile(
+                width = normalizeDimension(size.first),
+                height = normalizeDimension(size.second),
+                fps = normalizeFps(fps)
+            )
+        }
+        if (profiles.isEmpty()) return null
+        val inTargetBounds = profiles.filter { profileFitsPolicyBounds(it, policy) }
+        val candidatePool = if (inTargetBounds.isNotEmpty()) inTargetBounds else profiles
+        val targetArea = policy.targetWidth * policy.targetHeight
+        val targetFps = policy.targetFps
+        val minFps = policy.minFps
+        val chosen = candidatePool.minWithOrNull(
+            compareBy<CaptureProfile>(
+                { if (it.fps >= minFps) 0 else 1 },
+                { if (it.width * it.height <= targetArea) 0 else 1 },
+                { abs((it.width * it.height) - targetArea) },
+                { abs(it.fps - targetFps) },
+                { -(it.width * it.height) },
+                { -it.fps }
+            )
+        ) ?: return null
+        val selectedFps = if (chosen.fps >= minFps) {
+            min(chosen.fps, targetFps)
+        } else {
+            chosen.fps
+        }
+        return chosen.copy(fps = normalizeFps(selectedFps))
+    }
+
+    private fun profileFitsPolicyBounds(profile: CaptureProfile, policy: CapturePolicy): Boolean {
+        val profileLong = max(profile.width, profile.height)
+        val profileShort = min(profile.width, profile.height)
+        val targetLong = max(policy.targetWidth, policy.targetHeight)
+        val targetShort = min(policy.targetWidth, policy.targetHeight)
+        return profileLong <= targetLong && profileShort <= targetShort
+    }
+
+    private fun selectScreenShareCaptureProfile(): CaptureProfile {
+        val (rawWidth, rawHeight) = readDisplaySize()
+        val (width, height) = clampResolutionToTarget(
+            width = rawWidth,
+            height = rawHeight,
+            targetWidth = SCREEN_SHARE_MAX_WIDTH,
+            targetHeight = SCREEN_SHARE_MAX_HEIGHT
+        )
+        val displayFps = readDisplayFps()
+        val fps = displayFps.coerceIn(SCREEN_SHARE_MIN_FPS, SCREEN_SHARE_TARGET_FPS)
+        return CaptureProfile(
+            width = width,
+            height = height,
+            fps = normalizeFps(fps)
+        )
+    }
+
+    private fun readDisplaySize(): Pair<Int, Int> {
+        val windowManager = appContext.getSystemService(Context.WINDOW_SERVICE) as? android.view.WindowManager
+        if (windowManager != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val bounds = windowManager.currentWindowMetrics.bounds
+                if (bounds.width() > 0 && bounds.height() > 0) {
+                    return Pair(bounds.width(), bounds.height())
+                }
+            } else {
+                val metrics = DisplayMetrics()
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay?.getRealMetrics(metrics)
+                if (metrics.widthPixels > 0 && metrics.heightPixels > 0) {
+                    return Pair(metrics.widthPixels, metrics.heightPixels)
+                }
+            }
+        }
+        return Pair(SCREEN_SHARE_MAX_WIDTH, SCREEN_SHARE_MAX_HEIGHT)
+    }
+
+    private fun clampResolutionToTarget(
+        width: Int,
+        height: Int,
+        targetWidth: Int,
+        targetHeight: Int
+    ): Pair<Int, Int> {
+        val safeWidth = width.coerceAtLeast(2)
+        val safeHeight = height.coerceAtLeast(2)
+        val scale = min(
+            1.0,
+            min(
+                targetWidth.toDouble() / safeWidth.toDouble(),
+                targetHeight.toDouble() / safeHeight.toDouble()
+            )
+        )
+        val scaledWidth = normalizeDimension((safeWidth * scale).roundToInt())
+        val scaledHeight = normalizeDimension((safeHeight * scale).roundToInt())
+        return Pair(scaledWidth.coerceAtLeast(2), scaledHeight.coerceAtLeast(2))
+    }
+
+    private fun readDisplayFps(): Int {
+        val displayManager = appContext.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+        @Suppress("DEPRECATION")
+        val refreshRate = displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.refreshRate
+        if (refreshRate != null && refreshRate > 0f) {
+            return refreshRate.roundToInt()
+        }
+        return SCREEN_SHARE_TARGET_FPS
+    }
+
+    private fun normalizeDimension(value: Int): Int {
+        val positive = value.coerceAtLeast(2)
+        return if (positive % 2 == 0) positive else positive - 1
+    }
+
+    private fun normalizeFps(value: Int): Int {
+        val normalized = if (value > 1000) value / 1000 else value
+        return normalized.coerceIn(1, MAX_CAPTURE_FPS)
+    }
+
+    private fun defaultCaptureProfile(policy: CapturePolicy): CaptureProfile {
+        return CaptureProfile(
+            width = normalizeDimension(policy.targetWidth),
+            height = normalizeDimension(policy.targetHeight),
+            fps = normalizeFps(policy.targetFps)
+        )
     }
 
     private fun onCompositeStartFailure() {
@@ -778,8 +1070,28 @@ class WebRtcEngine(
     }
 
     private companion object {
-        const val CAPTURE_WIDTH = 640
-        const val CAPTURE_HEIGHT = 480
-        const val CAPTURE_FPS = 30
+        const val CAMERA_TARGET_WIDTH = 1280
+        const val CAMERA_TARGET_HEIGHT = 720
+        const val CAMERA_TARGET_FPS = 30
+        const val CAMERA_MIN_FPS = 20
+
+        const val COMPOSITE_TARGET_WIDTH = 960
+        const val COMPOSITE_TARGET_HEIGHT = 540
+        const val COMPOSITE_TARGET_FPS = 24
+        const val COMPOSITE_MIN_FPS = 15
+
+        const val SCREEN_SHARE_MAX_WIDTH = 1920
+        const val SCREEN_SHARE_MAX_HEIGHT = 1080
+        const val SCREEN_SHARE_TARGET_FPS = 30
+        const val SCREEN_SHARE_MIN_FPS = 15
+
+        const val CAMERA_MAX_BITRATE_BPS = 2_500_000
+        const val CAMERA_MIN_BITRATE_BPS = 350_000
+        const val COMPOSITE_MAX_BITRATE_BPS = 1_500_000
+        const val COMPOSITE_MIN_BITRATE_BPS = 300_000
+        const val SCREEN_SHARE_MAX_BITRATE_BPS = 5_000_000
+        const val SCREEN_SHARE_MIN_BITRATE_BPS = 1_000_000
+
+        const val MAX_CAPTURE_FPS = 60
     }
 }
