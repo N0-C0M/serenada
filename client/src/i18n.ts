@@ -49,7 +49,10 @@ const resources = {
 
             "install_not_supported": "Direct installation is not supported on this browser. Try Chrome on Android or Safari on iOS.",
             "notify_me": "Notify Me",
-            "notify_me_on": "Notify Me (On)"
+            "notify_me_on": "Notify Me (On)",
+            "screen_share_start": "Share Screen",
+            "screen_share_stop": "Stop Sharing",
+            "toast_screen_share_error": "Could not start screen sharing."
         }
     },
     ru: {
@@ -98,7 +101,10 @@ const resources = {
 
             "install_not_supported": "Прямая установка не поддерживается. Попробуйте Chrome на Android или Safari на iOS.",
             "notify_me": "Уведомить меня",
-            "notify_me_on": "Уведомления включены"
+            "notify_me_on": "Уведомления включены",
+            "screen_share_start": "Поделиться экраном",
+            "screen_share_stop": "Остановить показ",
+            "toast_screen_share_error": "Не удалось начать демонстрацию экрана."
         }
     },
     es: {
@@ -147,7 +153,10 @@ const resources = {
 
             "install_not_supported": "La instalación directa no es compatible. Prueba Chrome en Android o Safari en iOS.",
             "notify_me": "Notificarme",
-            "notify_me_on": "Notificaciones activadas"
+            "notify_me_on": "Notificaciones activadas",
+            "screen_share_start": "Compartir pantalla",
+            "screen_share_stop": "Detener uso compartido",
+            "toast_screen_share_error": "No se pudo iniciar el uso compartido de pantalla."
         }
     },
     fr: {
@@ -196,7 +205,10 @@ const resources = {
 
             "install_not_supported": "L'installation directe n'est pas supportée. Essayez Chrome sur Android ou Safari sur iOS.",
             "notify_me": "Me prévenir",
-            "notify_me_on": "Notifications activées"
+            "notify_me_on": "Notifications activées",
+            "screen_share_start": "Partager l'écran",
+            "screen_share_stop": "Arrêter le partage",
+            "toast_screen_share_error": "Impossible de démarrer le partage d'écran."
         }
     }
 };

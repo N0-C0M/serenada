@@ -12,6 +12,10 @@ interface WebRTCContextValue {
     remoteStream: MediaStream | null;
     startLocalMedia: () => Promise<MediaStream | null>;
     stopLocalMedia: () => void;
+    startScreenShare: () => Promise<void>;
+    stopScreenShare: () => Promise<void>;
+    isScreenSharing: boolean;
+    canScreenShare: boolean;
     flipCamera: () => Promise<void>;
     facingMode: 'user' | 'environment';
     hasMultipleCameras: boolean;
@@ -39,11 +43,13 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const pcRef = useRef<RTCPeerConnection | null>(null);
+    const screenShareTrackRef = useRef<MediaStreamTrack | null>(null);
     const requestingMediaRef = useRef(false);
     const unmountedRef = useRef(false);
     const localStreamRef = useRef<MediaStream | null>(null);
     const remoteStreamRef = useRef<MediaStream | null>(null);
     const isMakingOfferRef = useRef(false);
+    const isScreenSharingRef = useRef(false);
     const pendingIceRestartRef = useRef(false);
     const lastIceRestartAtRef = useRef(0);
     const iceRestartTimerRef = useRef<number | null>(null);
@@ -55,7 +61,10 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const rtcConfigRef = useRef<RTCConfiguration | null>(null);
     const signalingBufferRef = useRef<any[]>([]);
     const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+    const facingModeRef = useRef<'user' | 'environment'>('user');
     const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
+    const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [canScreenShare, setCanScreenShare] = useState(false);
     const roomStateRef = useRef(roomState);
     const clientIdRef = useRef(clientId);
     const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState>('new');
@@ -65,6 +74,18 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     useEffect(() => {
         isConnectedRef.current = isConnected;
     }, [isConnected]);
+
+    useEffect(() => {
+        setCanScreenShare(!!navigator.mediaDevices?.getDisplayMedia);
+    }, []);
+
+    useEffect(() => {
+        facingModeRef.current = facingMode;
+    }, [facingMode]);
+
+    useEffect(() => {
+        isScreenSharingRef.current = isScreenSharing;
+    }, [isScreenSharing]);
 
     useEffect(() => {
         if (!isConnected || !pendingIceRestartRef.current) {
@@ -585,16 +606,161 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         // Invalidate any pending requests
         mediaRequestIdRef.current += 1; // Incrementing invalidates previous ID
 
+        const screenShareTrack = screenShareTrackRef.current;
+        if (screenShareTrack) {
+            screenShareTrack.onended = null;
+            screenShareTrackRef.current = null;
+        }
+
         const stream = localStreamRef.current;
         if (stream) {
             stream.getTracks().forEach(t => t.stop());
             setLocalStream(null);
         }
+        setIsScreenSharing(false);
         setFacingMode('user');
         requestingMediaRef.current = false;
     }, []);
 
+    const stopScreenShare = useCallback(async () => {
+        if (!isScreenSharingRef.current) {
+            return;
+        }
+
+        const currentStream = localStreamRef.current;
+        if (!currentStream) {
+            setIsScreenSharing(false);
+            return;
+        }
+
+        const screenShareTrack = screenShareTrackRef.current;
+        if (screenShareTrack) {
+            screenShareTrack.onended = null;
+            screenShareTrackRef.current = null;
+        }
+
+        const previousVideoTrack = currentStream.getVideoTracks()[0];
+        const wasVideoEnabled = previousVideoTrack ? previousVideoTrack.enabled : true;
+
+        try {
+            const cameraStream = await navigator.mediaDevices.getUserMedia({
+                video: { facingMode: facingModeRef.current },
+                audio: false
+            });
+            const cameraTrack = cameraStream.getVideoTracks()[0];
+            if (!cameraTrack) {
+                throw new Error('No camera track returned');
+            }
+            cameraTrack.enabled = wasVideoEnabled;
+
+            const pc = pcRef.current;
+            if (pc) {
+                const videoSender = pc.getSenders().find(sender => sender.track?.kind === 'video');
+                if (videoSender) {
+                    await videoSender.replaceTrack(cameraTrack);
+                } else {
+                    pc.addTrack(cameraTrack, currentStream);
+                }
+            }
+
+            setLocalStream(new MediaStream([
+                cameraTrack,
+                ...currentStream.getAudioTracks()
+            ]));
+            if (previousVideoTrack) {
+                previousVideoTrack.stop();
+            }
+            setIsScreenSharing(false);
+        } catch (err) {
+            console.error('[WebRTC] Failed to stop screen share and restore camera', err);
+            const pc = pcRef.current;
+            if (pc) {
+                const videoSender = pc.getSenders().find(sender => sender.track?.kind === 'video');
+                if (videoSender) {
+                    try {
+                        await videoSender.replaceTrack(null);
+                    } catch (replaceErr) {
+                        console.warn('[WebRTC] Failed to clear video sender after screen share error', replaceErr);
+                    }
+                }
+            }
+            if (previousVideoTrack) {
+                previousVideoTrack.stop();
+            }
+            setLocalStream(new MediaStream([
+                ...currentStream.getAudioTracks()
+            ]));
+            setIsScreenSharing(false);
+            showToast('error', t('toast_camera_error'));
+        }
+    }, [showToast, t]);
+
+    const startScreenShare = useCallback(async () => {
+        if (isScreenSharingRef.current || !canScreenShare) {
+            return;
+        }
+
+        const currentStream = localStreamRef.current;
+        if (!currentStream) {
+            return;
+        }
+
+        try {
+            const displayStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: false
+            });
+            const displayTrack = displayStream.getVideoTracks()[0];
+            if (!displayTrack) {
+                displayStream.getTracks().forEach(track => track.stop());
+                throw new Error('No display track returned');
+            }
+
+            const previousVideoTrack = currentStream.getVideoTracks()[0];
+            const wasVideoEnabled = previousVideoTrack ? previousVideoTrack.enabled : true;
+            displayTrack.enabled = wasVideoEnabled;
+            if ('contentHint' in displayTrack) {
+                try {
+                    displayTrack.contentHint = 'detail';
+                } catch (err) {
+                    console.warn('[WebRTC] Failed to set display track contentHint', err);
+                }
+            }
+
+            const pc = pcRef.current;
+            if (pc) {
+                const videoSender = pc.getSenders().find(sender => sender.track?.kind === 'video');
+                if (videoSender) {
+                    await videoSender.replaceTrack(displayTrack);
+                } else {
+                    pc.addTrack(displayTrack, currentStream);
+                }
+            }
+
+            if (screenShareTrackRef.current) {
+                screenShareTrackRef.current.onended = null;
+            }
+            screenShareTrackRef.current = displayTrack;
+            displayTrack.onended = () => {
+                void stopScreenShare();
+            };
+
+            setLocalStream(new MediaStream([
+                displayTrack,
+                ...currentStream.getAudioTracks()
+            ]));
+            if (previousVideoTrack) {
+                previousVideoTrack.stop();
+            }
+            setIsScreenSharing(true);
+        } catch (err) {
+            console.error('[WebRTC] Failed to start screen share', err);
+            showToast('error', t('toast_screen_share_error'));
+        }
+    }, [canScreenShare, showToast, stopScreenShare, t]);
+
     const flipCamera = async () => {
+        if (isScreenSharingRef.current) return;
         if (!hasMultipleCameras) return;
 
         const newMode = facingMode === 'user' ? 'environment' : 'user';
@@ -745,6 +911,10 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             remoteStream,
             startLocalMedia,
             stopLocalMedia,
+            startScreenShare,
+            stopScreenShare,
+            isScreenSharing,
+            canScreenShare,
             flipCamera: flipCamera,
             facingMode: facingMode,
             hasMultipleCameras: hasMultipleCameras,

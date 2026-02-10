@@ -277,9 +277,26 @@ body {
   background: #30363d;
 }
 
+.btn-control:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-control:disabled:hover {
+  background: var(--surface-color);
+}
+
 .btn-control.active {
   background: white;
   color: black;
+}
+
+.btn-control.active-screen-share {
+  background: #8b1b1b;
+}
+
+.btn-control.active-screen-share:hover {
+  background: var(--danger-color);
 }
 
 .btn-leave {

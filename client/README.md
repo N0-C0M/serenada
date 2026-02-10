@@ -27,3 +27,4 @@ React single-page app built with Vite. The client connects to the Go signaling s
 ## Notes
 - Push notifications require a service worker (`public/sw.js`) and HTTPS (or localhost).
 - The UI exposes a per-room notification toggle when the browser supports Push.
+- In-call screen sharing is available on desktop browsers that implement `navigator.mediaDevices.getDisplayMedia`; it is intentionally hidden on mobile browsers.
