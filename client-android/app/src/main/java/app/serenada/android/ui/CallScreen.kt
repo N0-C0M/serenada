@@ -1,5 +1,6 @@
 package app.serenada.android.ui
 
+import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -9,11 +10,14 @@ import android.graphics.SurfaceTexture
 import android.graphics.Color as AndroidColor
 import android.os.Handler
 import android.os.Looper
+import android.media.projection.MediaProjectionManager
 import android.view.TextureView
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
@@ -70,22 +74,25 @@ import org.webrtc.VideoSink
 
 @Composable
 fun CallScreen(
-        roomId: String,
-        uiState: CallUiState,
-        serverHost: String,
-        eglContext: EglBase.Context,
-        onToggleAudio: () -> Unit,
-        onToggleVideo: () -> Unit,
-        onFlipCamera: () -> Unit,
-        onEndCall: () -> Unit,
-        attachLocalRenderer: (SurfaceViewRenderer, RendererCommon.RendererEvents?) -> Unit,
-        detachLocalRenderer: (SurfaceViewRenderer) -> Unit,
-        attachLocalSink: (VideoSink) -> Unit,
-        detachLocalSink: (VideoSink) -> Unit,
-        attachRemoteRenderer: (SurfaceViewRenderer, RendererCommon.RendererEvents?) -> Unit,
-        detachRemoteRenderer: (SurfaceViewRenderer) -> Unit,
-        attachRemoteSink: (VideoSink) -> Unit,
-        detachRemoteSink: (VideoSink) -> Unit
+    roomId: String,
+    uiState: CallUiState,
+    serverHost: String,
+    eglContext: EglBase.Context,
+    onToggleAudio: () -> Unit,
+    onToggleVideo: () -> Unit,
+    onFlipCamera: () -> Unit,
+    onEndCall: () -> Unit,
+    // Added callbacks for Screen Share
+    onStartScreenShare: (Intent) -> Unit = {},
+    onStopScreenShare: () -> Unit = {},
+    attachLocalRenderer: (SurfaceViewRenderer, RendererCommon.RendererEvents?) -> Unit,
+    detachLocalRenderer: (SurfaceViewRenderer) -> Unit,
+    attachLocalSink: (VideoSink) -> Unit,
+    detachLocalSink: (VideoSink) -> Unit,
+    attachRemoteRenderer: (SurfaceViewRenderer, RendererCommon.RendererEvents?) -> Unit,
+    detachRemoteRenderer: (SurfaceViewRenderer) -> Unit,
+    attachRemoteSink: (VideoSink) -> Unit,
+    detachRemoteSink: (VideoSink) -> Unit
 ) {
     var areControlsVisible by remember { mutableStateOf(true) }
     var isLocalLarge by rememberSaveable { mutableStateOf(false) }
@@ -99,6 +106,19 @@ fun CallScreen(
     val localPipRenderer = remember { PipTextureRendererView(context, "local-pip") }
     val remotePipRenderer = remember { PipTextureRendererView(context, "remote-pip") }
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
+
+    // Screen Share Launcher
+    val mediaProjectionManager = remember {
+        context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+    }
+    val screenShareLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK && result.data != null) {
+            onStartScreenShare(result.data!!)
+        }
+    }
+
     val remoteRendererEvents = remember {
         object : RendererCommon.RendererEvents {
             override fun onFirstFrameRendered() = Unit
@@ -113,7 +133,7 @@ fun CallScreen(
                 mainHandler.post {
                     val current = remoteAspectRatio
                     val orientationChanged =
-                            current != null && ((current > 1f) != (ratio > 1f))
+                        current != null && ((current > 1f) != (ratio > 1f))
                     val deltaThreshold = if (orientationChanged) 0.01f else 0.20f
                     if (current == null || abs(current - ratio) > deltaThreshold) {
                         remoteAspectRatio = ratio
@@ -135,7 +155,7 @@ fun CallScreen(
                 mainHandler.post {
                     val current = localAspectRatio
                     val orientationChanged =
-                            current != null && ((current > 1f) != (ratio > 1f))
+                        current != null && ((current > 1f) != (ratio > 1f))
                     val deltaThreshold = if (orientationChanged) 0.01f else 0.20f
                     if (current == null || abs(current - ratio) > deltaThreshold) {
                         localAspectRatio = ratio
@@ -157,19 +177,19 @@ fun CallScreen(
     }
 
     val isReconnecting =
-            remember(
-                    uiState.iceConnectionState,
-                    uiState.connectionState,
-                    uiState.isSignalingConnected
-            ) {
-                val iceState = uiState.iceConnectionState
-                val connState = uiState.connectionState
-                !uiState.isSignalingConnected ||
-                        iceState == "DISCONNECTED" ||
-                        iceState == "FAILED" ||
-                        connState == "DISCONNECTED" ||
-                        connState == "FAILED"
-            }
+        remember(
+            uiState.iceConnectionState,
+            uiState.connectionState,
+            uiState.isSignalingConnected
+        ) {
+            val iceState = uiState.iceConnectionState
+            val connState = uiState.connectionState
+            !uiState.isSignalingConnected ||
+                    iceState == "DISCONNECTED" ||
+                    iceState == "FAILED" ||
+                    connState == "DISCONNECTED" ||
+                    connState == "FAILED"
+        }
 
     // Auto-hide controls
     LaunchedEffect(areControlsVisible, uiState.phase) {
@@ -190,23 +210,23 @@ fun CallScreen(
     }
 
     BoxWithConstraints(
-            modifier =
-                    Modifier.fillMaxSize().background(Color.Black).clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null
-                            ) { areControlsVisible = !areControlsVisible }
+        modifier =
+            Modifier.fillMaxSize().background(Color.Black).clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { areControlsVisible = !areControlsVisible }
     ) {
         val controlsAnimationDuration = 320
         val showPip =
-                uiState.phase == CallPhase.InCall ||
-                        uiState.phase == CallPhase.Waiting ||
-                        uiState.connectionState == "CONNECTED"
+            uiState.phase == CallPhase.InCall ||
+                    uiState.phase == CallPhase.Waiting ||
+                    uiState.connectionState == "CONNECTED"
         val animatedPipBottomPadding by
-                animateDpAsState(
-                        targetValue = if (areControlsVisible) 160.dp else 48.dp,
-                        animationSpec = tween(durationMillis = controlsAnimationDuration),
-                        label = "pip_bottom_padding"
-                )
+        animateDpAsState(
+            targetValue = if (areControlsVisible) 160.dp else 48.dp,
+            animationSpec = tween(durationMillis = controlsAnimationDuration),
+            label = "pip_bottom_padding"
+        )
         val pipBackgroundColor = Color(0xFF222222)
         // For a square inset inside rounded corners, bleed-free geometry needs:
         // padding >= radius * (1 - 1/sqrt(2)) ~= 0.293 * radius.
@@ -214,34 +234,34 @@ fun CallScreen(
         val pipCornerRadius = 12.dp
         val pipContentPadding = 2.5.dp
         val pipInnerCornerRadius =
-                if (pipCornerRadius > pipContentPadding) pipCornerRadius - pipContentPadding else 0.dp
+            if (pipCornerRadius > pipContentPadding) pipCornerRadius - pipContentPadding else 0.dp
         val mainModifier =
-                Modifier.fillMaxSize().clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                        ) { areControlsVisible = !areControlsVisible }
+            Modifier.fillMaxSize().clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null
+            ) { areControlsVisible = !areControlsVisible }
 
         val pipBaseModifier =
-                if (showPip) {
-                    Modifier.padding(
-                                    bottom = animatedPipBottomPadding,
-                                    end = 16.dp
-                            )
-                            .align(Alignment.BottomEnd)
-                            .size(100.dp, 150.dp)
-                            .zIndex(1f)
-                } else {
-                    Modifier.size(0.dp)
-                }
+            if (showPip) {
+                Modifier.padding(
+                    bottom = animatedPipBottomPadding,
+                    end = 16.dp
+                )
+                    .align(Alignment.BottomEnd)
+                    .size(100.dp, 150.dp)
+                    .zIndex(1f)
+            } else {
+                Modifier.size(0.dp)
+            }
 
         val pipBackgroundModifier =
-                pipBaseModifier.clip(RoundedCornerShape(pipCornerRadius)).background(pipBackgroundColor)
-                        .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null
-                        ) { isLocalLarge = !isLocalLarge }
+            pipBaseModifier.clip(RoundedCornerShape(pipCornerRadius)).background(pipBackgroundColor)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) { isLocalLarge = !isLocalLarge }
         val pipVideoModifier =
-                pipBaseModifier.padding(pipContentPadding).clip(RoundedCornerShape(pipInnerCornerRadius))
+            pipBaseModifier.padding(pipContentPadding).clip(RoundedCornerShape(pipInnerCornerRadius))
 
         val localModifier = if (isLocalLarge) mainModifier else pipVideoModifier
         val remoteModifier = if (isLocalLarge) pipVideoModifier else mainModifier
@@ -270,26 +290,26 @@ fun CallScreen(
             if (uiState.localVideoEnabled) {
                 Box(modifier = localModifier.clipToBounds()) {
                     VideoSurface(
-                            modifier =
-                                    Modifier.size(fitWidth, fitHeight)
-                                            .align(Alignment.Center),
-                            renderer = localRenderer,
-                            onAttach = { renderer -> attachLocalRenderer(renderer, localRendererEvents) },
-                            onDetach = detachLocalRenderer,
-                            mirror = uiState.isFrontCamera,
-                            contentScale = ContentScale.Fit,
-                            isMediaOverlay = false
+                        modifier =
+                            Modifier.size(fitWidth, fitHeight)
+                                .align(Alignment.Center),
+                        renderer = localRenderer,
+                        onAttach = { renderer -> attachLocalRenderer(renderer, localRendererEvents) },
+                        onDetach = detachLocalRenderer,
+                        mirror = uiState.isFrontCamera && !uiState.isScreenSharing, // No mirror if screen share
+                        contentScale = if(uiState.isScreenSharing) ContentScale.Fit else ContentScale.Fit,
+                        isMediaOverlay = false
                     )
                 }
             }
             if (uiState.remoteVideoEnabled) {
                 TextureVideoSurface(
-                        modifier = remoteModifier,
-                        renderer = remotePipRenderer,
-                        onAttach = attachRemoteSink,
-                        onDetach = detachRemoteSink,
-                        mirror = false,
-                        contentScale = ContentScale.Crop
+                    modifier = remoteModifier,
+                    renderer = remotePipRenderer,
+                    onAttach = attachRemoteSink,
+                    onDetach = detachRemoteSink,
+                    mirror = false,
+                    contentScale = ContentScale.Crop
                 )
             }
         } else {
@@ -315,39 +335,39 @@ fun CallScreen(
                 coverScale = 1f
             }
             val animatedRemoteScale by
-                    animateFloatAsState(
-                            targetValue = if (remoteVideoFitCover) coverScale else 1f,
-                            animationSpec = tween(durationMillis = 260),
-                            label = "remote_video_scale"
-                    )
+            animateFloatAsState(
+                targetValue = if (remoteVideoFitCover) coverScale else 1f,
+                animationSpec = tween(durationMillis = 260),
+                label = "remote_video_scale"
+            )
             if (uiState.remoteVideoEnabled) {
                 Box(modifier = remoteModifier.clipToBounds()) {
                     VideoSurface(
-                            modifier =
-                                    Modifier.size(fitWidth, fitHeight)
-                                            .align(Alignment.Center)
-                                            .graphicsLayer {
-                                                scaleX = animatedRemoteScale
-                                                scaleY = animatedRemoteScale
-                                            },
-                            renderer = remoteRenderer,
-                            onAttach = { renderer ->
-                                attachRemoteRenderer(renderer, remoteRendererEvents)
-                            },
-                            onDetach = detachRemoteRenderer,
-                            contentScale = ContentScale.Crop,
-                            isMediaOverlay = false
+                        modifier =
+                            Modifier.size(fitWidth, fitHeight)
+                                .align(Alignment.Center)
+                                .graphicsLayer {
+                                    scaleX = animatedRemoteScale
+                                    scaleY = animatedRemoteScale
+                                },
+                        renderer = remoteRenderer,
+                        onAttach = { renderer ->
+                            attachRemoteRenderer(renderer, remoteRendererEvents)
+                        },
+                        onDetach = detachRemoteRenderer,
+                        contentScale = ContentScale.Crop,
+                        isMediaOverlay = false
                     )
                 }
             }
             if (uiState.localVideoEnabled) {
                 TextureVideoSurface(
-                        modifier = localModifier,
-                        renderer = localPipRenderer,
-                        onAttach = attachLocalSink,
-                        onDetach = detachLocalSink,
-                        mirror = uiState.isFrontCamera,
-                        contentScale = ContentScale.Crop
+                    modifier = localModifier,
+                    renderer = localPipRenderer,
+                    onAttach = attachLocalSink,
+                    onDetach = detachLocalSink,
+                    mirror = uiState.isFrontCamera && !uiState.isScreenSharing, // No mirror if screen share
+                    contentScale = if(uiState.isScreenSharing) ContentScale.Fit else ContentScale.Crop
                 )
             }
         }
@@ -355,22 +375,22 @@ fun CallScreen(
         if (!uiState.localVideoEnabled) {
             Box(modifier = localModifier) {
                 VideoPlaceholder(
-                        text =
-                                if (isLocalLarge) stringResource(R.string.call_local_camera_off)
-                                else stringResource(R.string.call_camera_off),
-                        fontSize = if (isLocalLarge) 16.sp else 10.sp
+                    text =
+                        if (isLocalLarge) stringResource(R.string.call_local_camera_off)
+                        else stringResource(R.string.call_camera_off),
+                    fontSize = if (isLocalLarge) 16.sp else 10.sp
                 )
             }
         }
 
         val showRemotePlaceholder =
-                !uiState.remoteVideoEnabled &&
-                        (uiState.phase == CallPhase.InCall ||
-                                (uiState.phase == CallPhase.Waiting && isLocalLarge))
+            !uiState.remoteVideoEnabled &&
+                    (uiState.phase == CallPhase.InCall ||
+                            (uiState.phase == CallPhase.Waiting && isLocalLarge))
         if (showRemotePlaceholder) {
             val text =
-                    if (uiState.phase == CallPhase.Waiting) stringResource(R.string.call_waiting_short)
-                    else stringResource(R.string.call_video_off)
+                if (uiState.phase == CallPhase.Waiting) stringResource(R.string.call_waiting_short)
+                else stringResource(R.string.call_video_off)
             Box(modifier = remoteModifier) {
                 VideoPlaceholder(text = text, fontSize = if (isLocalLarge) 10.sp else 16.sp)
             }
@@ -383,17 +403,17 @@ fun CallScreen(
 
         // Reconnecting Indicator
         AnimatedVisibility(
-                visible = isReconnecting && uiState.phase == CallPhase.InCall,
-                enter = fadeIn(),
-                exit = fadeOut(),
-                modifier = Modifier.align(Alignment.TopCenter).padding(top = 64.dp)
+            visible = isReconnecting && uiState.phase == CallPhase.InCall,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 64.dp)
         ) {
             Surface(color = Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(20.dp)) {
                 Text(
-                        text = stringResource(R.string.call_reconnecting),
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        fontSize = 14.sp
+                    text = stringResource(R.string.call_reconnecting),
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                    fontSize = 14.sp
                 )
             }
         }
@@ -401,107 +421,121 @@ fun CallScreen(
         // Zoom/Fit Button (Top Right)
         if (uiState.remoteVideoEnabled && !isLocalLarge) {
             IconButton(
-                    onClick = { remoteVideoFitCover = !remoteVideoFitCover },
-                    modifier =
-                            Modifier.align(Alignment.TopEnd)
-                                    .statusBarsPadding()
-                                    .padding(top = 16.dp, end = 16.dp)
-                                    .size(44.dp)
-                                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
-                                    .zIndex(2f)
+                onClick = { remoteVideoFitCover = !remoteVideoFitCover },
+                modifier =
+                    Modifier.align(Alignment.TopEnd)
+                        .statusBarsPadding()
+                        .padding(top = 16.dp, end = 16.dp)
+                        .size(44.dp)
+                        .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                        .zIndex(2f)
             ) {
                 Icon(
-                        imageVector =
-                                if (remoteVideoFitCover) Icons.Default.FullscreenExit
-                                else Icons.Default.Fullscreen,
-                        contentDescription = stringResource(R.string.call_toggle_video_fit),
-                        tint = Color.White
+                    imageVector =
+                        if (remoteVideoFitCover) Icons.Default.FullscreenExit
+                        else Icons.Default.Fullscreen,
+                    contentDescription = stringResource(R.string.call_toggle_video_fit),
+                    tint = Color.White
                 )
             }
         }
 
         // Controls Bar
         AnimatedVisibility(
-                visible = areControlsVisible,
-                enter =
-                        fadeIn(animationSpec = tween(durationMillis = controlsAnimationDuration)) +
-                                slideInVertically(
-                                        animationSpec = tween(durationMillis = controlsAnimationDuration),
-                                        initialOffsetY = { fullHeight -> fullHeight / 3 }
-                                ),
-                exit =
-                        fadeOut(animationSpec = tween(durationMillis = controlsAnimationDuration)) +
-                                slideOutVertically(
-                                        animationSpec = tween(durationMillis = controlsAnimationDuration),
-                                        targetOffsetY = { fullHeight -> fullHeight / 3 }
-                                ),
-                modifier = Modifier.align(Alignment.BottomCenter)
+            visible = areControlsVisible,
+            enter =
+                fadeIn(animationSpec = tween(durationMillis = controlsAnimationDuration)) +
+                        slideInVertically(
+                            animationSpec = tween(durationMillis = controlsAnimationDuration),
+                            initialOffsetY = { fullHeight -> fullHeight / 3 }
+                        ),
+            exit =
+                fadeOut(animationSpec = tween(durationMillis = controlsAnimationDuration)) +
+                        slideOutVertically(
+                            animationSpec = tween(durationMillis = controlsAnimationDuration),
+                            targetOffsetY = { fullHeight -> fullHeight / 3 }
+                        ),
+            modifier = Modifier.align(Alignment.BottomCenter)
         ) {
             Column(
-                    modifier =
-                            Modifier.fillMaxWidth()
-                                    .animateContentSize(
-                                            animationSpec =
-                                                    tween(durationMillis = controlsAnimationDuration)
+                modifier =
+                    Modifier.fillMaxWidth()
+                        .animateContentSize(
+                            animationSpec =
+                                tween(durationMillis = controlsAnimationDuration)
+                        )
+                        .background(
+                            brush =
+                                androidx.compose.ui.graphics.Brush
+                                    .verticalGradient(
+                                        colors =
+                                            listOf(
+                                                Color.Transparent,
+                                                Color.Black
+                                                    .copy(
+                                                        alpha =
+                                                            0.7f
+                                                    )
+                                            )
                                     )
-                                    .background(
-                                            brush =
-                                                    androidx.compose.ui.graphics.Brush
-                                                            .verticalGradient(
-                                                                    colors =
-                                                                            listOf(
-                                                                                    Color.Transparent,
-                                                                                    Color.Black
-                                                                                            .copy(
-                                                                                                    alpha =
-                                                                                                            0.7f
-                                                                                            )
-                                                                            )
-                                                            )
-                                    )
-                                    .padding(bottom = 48.dp, top = 24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        )
+                        .padding(bottom = 48.dp, top = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Row(
-                        horizontalArrangement = Arrangement.spacedBy(20.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Order: Flip, Mute, Camera, End call
+                    // Order: Screen Share, Flip, Mute, Camera, End call
 
-                    // Flip Camera
+                    // Screen Share Button (New)
                     ControlButton(
-                            onClick = onFlipCamera,
-                            icon = Icons.Default.FlipCameraIos,
-                            backgroundColor = Color.White.copy(alpha = 0.2f)
+                        onClick = {
+                            if (uiState.isScreenSharing) {
+                                onStopScreenShare()
+                            } else {
+                                screenShareLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+                            }
+                        },
+                        icon = if (uiState.isScreenSharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+                        backgroundColor = if (uiState.isScreenSharing) Color.Red else Color.White.copy(alpha = 0.2f)
+                    )
+
+                    // Flip Camera (Disable if Screen Sharing)
+                    ControlButton(
+                        onClick = onFlipCamera,
+                        icon = Icons.Default.FlipCameraIos,
+                        backgroundColor = if(uiState.isScreenSharing) Color.Gray.copy(alpha = 0.1f) else Color.White.copy(alpha = 0.2f),
+                        // Disabled visual appearance could be added here
                     )
 
                     // Mute Button
                     ControlButton(
-                            onClick = onToggleAudio,
-                            icon =
-                                    if (uiState.localAudioEnabled) Icons.Default.Mic
-                                    else Icons.Default.MicOff,
-                            backgroundColor =
-                                    if (uiState.localAudioEnabled) Color.White.copy(alpha = 0.2f)
-                                    else Color.Red
+                        onClick = onToggleAudio,
+                        icon =
+                            if (uiState.localAudioEnabled) Icons.Default.Mic
+                            else Icons.Default.MicOff,
+                        backgroundColor =
+                            if (uiState.localAudioEnabled) Color.White.copy(alpha = 0.2f)
+                            else Color.Red
                     )
 
                     // Video Toggle Button
                     ControlButton(
-                            onClick = onToggleVideo,
-                            icon =
-                                    if (uiState.localVideoEnabled) Icons.Default.Videocam
-                                    else Icons.Default.VideocamOff,
-                            backgroundColor =
-                                    if (uiState.localVideoEnabled) Color.White.copy(alpha = 0.2f)
-                                    else Color.Red
+                        onClick = onToggleVideo,
+                        icon =
+                            if (uiState.localVideoEnabled) Icons.Default.Videocam
+                            else Icons.Default.VideocamOff,
+                        backgroundColor =
+                            if (uiState.localVideoEnabled) Color.White.copy(alpha = 0.2f)
+                            else Color.Red
                     )
 
                     // End Call Button
                     ControlButton(
-                            onClick = onEndCall,
-                            icon = Icons.Default.CallEnd,
-                            backgroundColor = Color.Red
+                        onClick = onEndCall,
+                        icon = Icons.Default.CallEnd,
+                        backgroundColor = Color.Red
                     )
                 }
             }
@@ -511,22 +545,22 @@ fun CallScreen(
 
 @Composable
 private fun ControlButton(
-        onClick: () -> Unit,
-        icon: androidx.compose.ui.graphics.vector.ImageVector,
-        backgroundColor: Color,
-        buttonSize: androidx.compose.ui.unit.Dp = 56.dp,
-        iconSize: androidx.compose.ui.unit.Dp = 28.dp
+    onClick: () -> Unit,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    backgroundColor: Color,
+    buttonSize: androidx.compose.ui.unit.Dp = 56.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 28.dp
 ) {
     Surface(
-            modifier = Modifier.size(buttonSize).clip(CircleShape).clickable { onClick() },
-            color = backgroundColor
+        modifier = Modifier.size(buttonSize).clip(CircleShape).clickable { onClick() },
+        color = backgroundColor
     ) {
         Box(contentAlignment = Alignment.Center) {
             Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(iconSize),
-                    tint = Color.White
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(iconSize),
+                tint = Color.White
             )
         }
     }
@@ -540,29 +574,29 @@ private fun WaitingOverlay(roomId: String, serverHost: String) {
     val chooserTitle = stringResource(R.string.call_share_link_chooser)
 
     Column(
-            modifier = Modifier.fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Text(
-                text = stringResource(R.string.call_waiting_overlay),
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Medium,
-                textAlign = TextAlign.Center
+            text = stringResource(R.string.call_waiting_overlay),
+            color = Color.White,
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center
         )
 
         Spacer(modifier = Modifier.height(32.dp))
 
         Surface(
-                modifier = Modifier.size(200.dp).clip(RoundedCornerShape(16.dp)),
-                color = Color.White
+            modifier = Modifier.size(200.dp).clip(RoundedCornerShape(16.dp)),
+            color = Color.White
         ) {
             qrBitmap?.let {
                 Image(
-                        bitmap = it.asImageBitmap(),
-                        contentDescription = stringResource(R.string.call_qr_code),
-                        modifier = Modifier.fillMaxSize().padding(16.dp)
+                    bitmap = it.asImageBitmap(),
+                    contentDescription = stringResource(R.string.call_qr_code),
+                    modifier = Modifier.fillMaxSize().padding(16.dp)
                 )
             }
         }
@@ -570,12 +604,12 @@ private fun WaitingOverlay(roomId: String, serverHost: String) {
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
-                onClick = { shareLink(context, link, chooserTitle) },
-                colors =
-                        ButtonDefaults.buttonColors(
-                                containerColor = Color.White.copy(alpha = 0.2f)
-                        ),
-                shape = RoundedCornerShape(12.dp)
+            onClick = { shareLink(context, link, chooserTitle) },
+            colors =
+                ButtonDefaults.buttonColors(
+                    containerColor = Color.White.copy(alpha = 0.2f)
+                ),
+            shape = RoundedCornerShape(12.dp)
         ) {
             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
@@ -586,12 +620,12 @@ private fun WaitingOverlay(roomId: String, serverHost: String) {
 
 @Composable
 private fun TextureVideoSurface(
-        modifier: Modifier,
-        renderer: PipTextureRendererView,
-        onAttach: (VideoSink) -> Unit,
-        onDetach: (VideoSink) -> Unit,
-        mirror: Boolean = false,
-        contentScale: ContentScale = ContentScale.Crop
+    modifier: Modifier,
+    renderer: PipTextureRendererView,
+    onAttach: (VideoSink) -> Unit,
+    onDetach: (VideoSink) -> Unit,
+    mirror: Boolean = false,
+    contentScale: ContentScale = ContentScale.Crop
 ) {
     DisposableEffect(renderer) {
         onAttach(renderer)
@@ -599,29 +633,29 @@ private fun TextureVideoSurface(
     }
 
     AndroidView(
-            modifier = modifier,
-            factory = { renderer },
-            update = {
-                it.setMirror(mirror)
-                it.setScalingType(
-                        if (contentScale == ContentScale.Crop)
-                                RendererCommon.ScalingType.SCALE_ASPECT_FILL
-                        else RendererCommon.ScalingType.SCALE_ASPECT_FIT
-                )
-            }
+        modifier = modifier,
+        factory = { renderer },
+        update = {
+            it.setMirror(mirror)
+            it.setScalingType(
+                if (contentScale == ContentScale.Crop)
+                    RendererCommon.ScalingType.SCALE_ASPECT_FILL
+                else RendererCommon.ScalingType.SCALE_ASPECT_FIT
+            )
+        }
     )
 }
 
 @Composable
 private fun VideoSurface(
-        modifier: Modifier,
-        renderer: SurfaceViewRenderer,
-        onAttach: (SurfaceViewRenderer) -> Unit,
-        onDetach: (SurfaceViewRenderer) -> Unit,
-        mirror: Boolean = false,
-        contentScale: ContentScale = ContentScale.Crop,
-        cornerRadius: androidx.compose.ui.unit.Dp? = null,
-        isMediaOverlay: Boolean = false
+    modifier: Modifier,
+    renderer: SurfaceViewRenderer,
+    onAttach: (SurfaceViewRenderer) -> Unit,
+    onDetach: (SurfaceViewRenderer) -> Unit,
+    mirror: Boolean = false,
+    contentScale: ContentScale = ContentScale.Crop,
+    cornerRadius: androidx.compose.ui.unit.Dp? = null,
+    isMediaOverlay: Boolean = false
 ) {
     val density = LocalDensity.current
     val cornerRadiusPx = remember(cornerRadius, density) {
@@ -634,31 +668,31 @@ private fun VideoSurface(
     }
 
     AndroidView(
-            modifier = modifier,
-            factory = {
-                RendererContainer(it, renderer).apply {
-                    updateCornerRadius(cornerRadiusPx)
-                }
-            },
-            update = { container ->
-                container.updateCornerRadius(cornerRadiusPx)
-                renderer.apply {
-                    setZOrderOnTop(false)
-                    setZOrderMediaOverlay(isMediaOverlay)
-                    setMirror(mirror)
-                    setScalingType(
-                        if (contentScale == ContentScale.Crop)
-                                RendererCommon.ScalingType.SCALE_ASPECT_FILL
-                        else RendererCommon.ScalingType.SCALE_ASPECT_FIT
-                    )
-                }
+        modifier = modifier,
+        factory = {
+            RendererContainer(it, renderer).apply {
+                updateCornerRadius(cornerRadiusPx)
             }
+        },
+        update = { container ->
+            container.updateCornerRadius(cornerRadiusPx)
+            renderer.apply {
+                setZOrderOnTop(false)
+                setZOrderMediaOverlay(isMediaOverlay)
+                setMirror(mirror)
+                setScalingType(
+                    if (contentScale == ContentScale.Crop)
+                        RendererCommon.ScalingType.SCALE_ASPECT_FILL
+                    else RendererCommon.ScalingType.SCALE_ASPECT_FIT
+                )
+            }
+        }
     )
 }
 
 private class PipTextureRendererView(
-        context: Context,
-        name: String
+    context: Context,
+    name: String
 ) : TextureView(context), TextureView.SurfaceTextureListener, VideoSink {
     private val eglRenderer = EglRenderer(name)
     private val drawer = GlRectDrawer()
@@ -677,8 +711,8 @@ private class PipTextureRendererView(
     }
 
     fun init(
-            eglContext: EglBase.Context,
-            rendererEvents: RendererCommon.RendererEvents? = null
+        eglContext: EglBase.Context,
+        rendererEvents: RendererCommon.RendererEvents? = null
     ) {
         if (initialized) {
             this.rendererEvents = rendererEvents
@@ -781,27 +815,27 @@ private class PipTextureRendererView(
 }
 
 private class RendererContainer(
-        context: Context,
-        renderer: SurfaceViewRenderer
+    context: Context,
+    renderer: SurfaceViewRenderer
 ) : FrameLayout(context) {
     private var cornerRadiusPx: Float = 0f
     private val roundedOutlineProvider =
-            object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
-                }
+        object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx)
             }
+        }
 
     init {
         if (renderer.parent is ViewGroup) {
             (renderer.parent as ViewGroup).removeView(renderer)
         }
         addView(
-                renderer,
-                LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                )
+            renderer,
+            LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
         )
         isClickable = false
         isFocusable = false
@@ -823,22 +857,22 @@ private class RendererContainer(
 @Composable
 private fun VideoPlaceholder(text: String, fontSize: androidx.compose.ui.unit.TextUnit = 16.sp) {
     Box(
-            modifier = Modifier.fillMaxSize().background(Color(0xFF111111)),
-            contentAlignment = Alignment.Center
+        modifier = Modifier.fillMaxSize().background(Color(0xFF111111)),
+        contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
-                    imageVector = Icons.Default.VideocamOff,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.3f),
-                    modifier = Modifier.size(if (fontSize < 12.sp) 32.dp else 48.dp)
+                imageVector = Icons.Default.VideocamOff,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier.size(if (fontSize < 12.sp) 32.dp else 48.dp)
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                    text = text,
-                    color = Color.White.copy(alpha = 0.5f),
-                    fontSize = fontSize,
-                    textAlign = TextAlign.Center
+                text = text,
+                color = Color.White.copy(alpha = 0.5f),
+                fontSize = fontSize,
+                textAlign = TextAlign.Center
             )
         }
     }
@@ -854,9 +888,9 @@ private fun generateQrCode(text: String): Bitmap? {
         for (x in 0 until width) {
             for (y in 0 until height) {
                 bitmap.setPixel(
-                        x,
-                        y,
-                        if (bitMatrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE
+                    x,
+                    y,
+                    if (bitMatrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE
                 )
             }
         }
@@ -868,10 +902,11 @@ private fun generateQrCode(text: String): Bitmap? {
 
 private fun shareLink(context: Context, text: String, chooserTitle: String) {
     val intent =
-            Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, text)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
+        Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
     context.startActivity(Intent.createChooser(intent, chooserTitle))
 }
+

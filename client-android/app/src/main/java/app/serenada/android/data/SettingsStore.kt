@@ -9,7 +9,10 @@ class SettingsStore(context: Context) {
     var host: String
         get() = prefs.getString(KEY_HOST, DEFAULT_HOST) ?: DEFAULT_HOST
         set(value) {
-            prefs.edit().putString(KEY_HOST, value.trim()).apply()
+            val cleanValue = value.trim()
+            if (cleanValue.isNotBlank()) {
+                prefs.edit().putString(KEY_HOST, cleanValue).apply()
+            }
         }
 
     var reconnectCid: String?
@@ -30,20 +33,48 @@ class SettingsStore(context: Context) {
             prefs.edit().putString(KEY_LANGUAGE, normalizeLanguage(value)).apply()
         }
 
+
+    var isBackgroundModeEnabled: Boolean
+        get() = prefs.getBoolean(KEY_BACKGROUND_MODE, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_BACKGROUND_MODE, value).apply()
+        }
+
+    var isDefaultCameraEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DEFAULT_CAMERA_ENABLED, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DEFAULT_CAMERA_ENABLED, value).apply()
+        }
+
+    var isDefaultMicrophoneEnabled: Boolean
+        get() = prefs.getBoolean(KEY_DEFAULT_MIC_ENABLED, true)
+        set(value) {
+            prefs.edit().putBoolean(KEY_DEFAULT_MIC_ENABLED, value).apply()
+        }
+
+
     companion object {
         const val DEFAULT_HOST = "serenada.app"
+        const val HOST_RU = "serenada-app.ru"
+
+        val PREDEFINED_HOSTS = listOf(DEFAULT_HOST, HOST_RU)
+
         const val LANGUAGE_AUTO = "auto"
         const val LANGUAGE_EN = "en"
         const val LANGUAGE_RU = "ru"
         const val LANGUAGE_ES = "es"
         const val LANGUAGE_FR = "fr"
+
         private const val KEY_HOST = "host"
         private const val KEY_RECONNECT_CID = "reconnect_cid"
         private const val KEY_LANGUAGE = "language"
+        private const val KEY_BACKGROUND_MODE = "background_mode"
+        private const val KEY_DEFAULT_CAMERA_ENABLED = "default_camera_enabled"
+        private const val KEY_DEFAULT_MIC_ENABLED = "default_mic_enabled"
 
         fun normalizeLanguage(value: String?): String =
             when (value) {
-                LANGUAGE_AUTO, LANGUAGE_EN, LANGUAGE_RU, LANGUAGE_ES, LANGUAGE_FR -> value
+                LANGUAGE_AUTO, LANGUAGE_EN, LANGUAGE_RU, LANGUAGE_ES, LANGUAGE_FR -> value ?: LANGUAGE_AUTO
                 else -> LANGUAGE_AUTO
             }
     }

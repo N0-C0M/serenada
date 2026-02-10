@@ -1,6 +1,7 @@
 package app.serenada.android.call
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkRequest
@@ -35,7 +36,7 @@ class CallManager(context: Context) {
     private val recentCallStore = RecentCallStore(appContext)
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-    private var networkCallbackRegistered = false
+
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             handler.post {
@@ -51,11 +52,22 @@ class CallManager(context: Context) {
 
     private val _serverHost = mutableStateOf(settingsStore.host)
     val serverHost: State<String> = _serverHost
+
     private val _selectedLanguage = mutableStateOf(settingsStore.language)
     val selectedLanguage: State<String> = _selectedLanguage
 
+    private val _isBackgroundModeEnabled = mutableStateOf(settingsStore.isBackgroundModeEnabled)
+    val isBackgroundModeEnabled: State<Boolean> = _isBackgroundModeEnabled
+
+    private val _isDefaultCameraEnabled = mutableStateOf(settingsStore.isDefaultCameraEnabled)
+    val isDefaultCameraEnabled: State<Boolean> = _isDefaultCameraEnabled
+
+    private val _isDefaultMicrophoneEnabled = mutableStateOf(settingsStore.isDefaultMicrophoneEnabled)
+    val isDefaultMicrophoneEnabled: State<Boolean> = _isDefaultMicrophoneEnabled
+
     private val _recentCalls = mutableStateOf<List<RecentCall>>(emptyList())
     val recentCalls: State<List<RecentCall>> = _recentCalls
+
     private val _roomStatuses = mutableStateOf<Map<String, Int>>(emptyMap())
     val roomStatuses: State<Map<String, Int>> = _roomStatuses
 
@@ -185,6 +197,18 @@ class CallManager(context: Context) {
         refreshRecentCalls()
     }
 
+    private fun registerConnectivityListener() {
+        try {
+            connectivityManager.registerNetworkCallback(NetworkRequest.Builder().build(), networkCallback)
+        } catch (e: Exception) {
+            Log.e("CallManager", "Failed to register network callback", e)
+        }
+    }
+
+    private fun shouldReconnectSignaling(): Boolean {
+        return currentRoomId != null || watchedRoomIds.isNotEmpty()
+    }
+
     fun updateServerHost(host: String) {
         val trimmed = host.trim().ifBlank { SettingsStore.DEFAULT_HOST }
         val changed = trimmed != _serverHost.value
@@ -213,13 +237,28 @@ class CallManager(context: Context) {
         AppLocaleManager.applyLanguage(normalized)
     }
 
+    fun updateBackgroundMode(enabled: Boolean) {
+        settingsStore.isBackgroundModeEnabled = enabled
+        _isBackgroundModeEnabled.value = enabled
+    }
+
+    fun updateDefaultCamera(enabled: Boolean) {
+        settingsStore.isDefaultCameraEnabled = enabled
+        _isDefaultCameraEnabled.value = enabled
+    }
+
+    fun updateDefaultMicrophone(enabled: Boolean) {
+        settingsStore.isDefaultMicrophoneEnabled = enabled
+        _isDefaultMicrophoneEnabled.value = enabled
+    }
+
     fun handleDeepLink(uri: Uri) {
         val roomId = extractRoomId(uri) ?: return
         val state = _uiState.value
         val isSameActiveRoom = (state.roomId == roomId || currentRoomId == roomId) &&
-            state.phase != CallPhase.Idle &&
-            state.phase != CallPhase.Error &&
-            state.phase != CallPhase.Ending
+                state.phase != CallPhase.Idle &&
+                state.phase != CallPhase.Error &&
+                state.phase != CallPhase.Ending
         if (isSameActiveRoom) {
             Log.d("CallManager", "Ignoring duplicate deep link for active room $roomId")
             return
@@ -229,6 +268,10 @@ class CallManager(context: Context) {
             updateServerHost(linkHost)
         }
         joinRoom(roomId)
+    }
+
+    private fun extractRoomId(uri: Uri): String? {
+        return uri.pathSegments.lastOrNull()
     }
 
     fun joinFromInput(input: String) {
@@ -299,16 +342,29 @@ class CallManager(context: Context) {
         callStartTimeMs = System.currentTimeMillis()
         sentOffer = false
         pendingMessages.clear()
+
+
+        val defaultAudio = settingsStore.isDefaultMicrophoneEnabled
+        val defaultVideo = settingsStore.isDefaultCameraEnabled
+
         updateState(
             _uiState.value.copy(
                 phase = CallPhase.Joining,
                 roomId = roomId,
                 statusMessageResId = R.string.call_status_joining_room,
                 errorMessageResId = null,
-                errorMessageText = null
+                errorMessageText = null,
+                localAudioEnabled = defaultAudio,
+                localVideoEnabled = defaultVideo
             )
         )
+
         webRtcEngine.startLocalMedia()
+
+        // Apply defaults immediately after starting media
+        if (!defaultAudio) webRtcEngine.toggleAudio(false)
+        if (!defaultVideo) webRtcEngine.toggleVideo(false)
+
         startRemoteVideoStatePolling()
         ensureSignalingConnection()
         CallService.start(appContext, roomId)
@@ -355,7 +411,37 @@ class CallManager(context: Context) {
     }
 
     fun flipCamera() {
-        webRtcEngine.flipCamera()
+        // Can only flip if not screen sharing
+        if (!_uiState.value.isScreenSharing) {
+            webRtcEngine.flipCamera()
+        }
+    }
+
+    fun startScreenShare(intent: Intent) {
+        if (_uiState.value.isScreenSharing) return
+        try {
+            val method = webRtcEngine::class.java.getMethod("startScreenShare", Intent::class.java)
+            method.invoke(webRtcEngine, intent)
+        } catch (e: Exception) {
+            Log.e("CallManager", "WebRtcEngine.startScreenShare not found. Please implement it.", e)
+            return
+        }
+
+        updateState(_uiState.value.copy(isScreenSharing = true))
+    }
+
+    fun stopScreenShare() {
+        if (!_uiState.value.isScreenSharing) return
+
+        try {
+            val method = webRtcEngine::class.java.getMethod("stopScreenShare")
+            method.invoke(webRtcEngine)
+        } catch (e: Exception) {
+            Log.e("CallManager", "WebRtcEngine.stopScreenShare not found. Please implement it.", e)
+            return
+        }
+
+        updateState(_uiState.value.copy(isScreenSharing = false))
     }
 
     fun attachLocalRenderer(
@@ -829,7 +915,17 @@ class CallManager(context: Context) {
                 statusMessageResId = messageResId
             )
         )
-        saveCurrentCallToHistoryIfNeeded()
+
+
+        if (uiState.value.isScreenSharing) {
+            try {
+                val method = webRtcEngine::class.java.getMethod("stopScreenShare")
+                method.invoke(webRtcEngine)
+            } catch (e: Exception) {
+
+            }
+        }
+
         settingsStore.reconnectCid = null
         resetResources()
         updateState(CallUiState(phase = CallPhase.Idle))
@@ -896,54 +992,5 @@ class CallManager(context: Context) {
         } else {
             signalingClient.connect(serverHost.value)
         }
-    }
-
-    private fun saveCurrentCallToHistoryIfNeeded() {
-        val roomId = currentRoomId ?: return
-        val startTime = callStartTimeMs ?: return
-        val durationSeconds = ((System.currentTimeMillis() - startTime) / 1000L)
-            .coerceAtLeast(0L)
-            .toInt()
-        recentCallStore.saveCall(
-            RecentCall(
-                roomId = roomId,
-                startTime = startTime,
-                durationSeconds = durationSeconds
-            )
-        )
-        callStartTimeMs = null
-        refreshRecentCalls()
-    }
-
-    private fun shouldReconnectSignaling(): Boolean {
-        val activeRoom = currentRoomId
-        if (activeRoom != null && _uiState.value.phase != CallPhase.Ending) {
-            return true
-        }
-        return activeRoom == null && watchedRoomIds.isNotEmpty()
-    }
-
-    private fun registerConnectivityListener() {
-        if (networkCallbackRegistered) return
-        networkCallbackRegistered = true
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                connectivityManager.registerDefaultNetworkCallback(networkCallback)
-            } else {
-                val request = NetworkRequest.Builder().build()
-                connectivityManager.registerNetworkCallback(request, networkCallback)
-            }
-        } catch (e: Exception) {
-            networkCallbackRegistered = false
-            Log.w("CallManager", "Failed to register network callback", e)
-        }
-    }
-
-    private fun extractRoomId(uri: Uri): String? {
-        val segments = uri.pathSegments
-        if (segments.isNullOrEmpty()) return null
-        val idx = segments.indexOf("call")
-        if (idx == -1 || segments.size <= idx + 1) return null
-        return segments[idx + 1]
     }
 }
