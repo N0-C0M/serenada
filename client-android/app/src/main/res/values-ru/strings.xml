@@ -19,6 +19,7 @@
     <string name="settings_language_spanish">Español</string>
     <string name="settings_language_french">Français</string>
     <string name="settings_language_help">Авто использует язык устройства. Неподдерживаемые языки переключаются на английский.</string>
+    <string name="settings_call_defaults">Параметры звонка</string>
     <string name="settings_error_invalid_server_host">Этот хост недоступен или не является сервером Serenada.</string>
 
     <string name="join_enter_code_or_link">Введите код или ссылку</string>
