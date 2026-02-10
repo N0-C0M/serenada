@@ -21,21 +21,31 @@ class CallService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_START) {
             val roomId = intent.getStringExtra(EXTRA_ROOM_ID).orEmpty()
+            val includeMediaProjection = intent.getBooleanExtra(EXTRA_INCLUDE_MEDIA_PROJECTION, false)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                val serviceTypes =
+                var serviceTypes =
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                if (includeMediaProjection) {
+                    serviceTypes = serviceTypes or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                }
                 startForeground(NOTIFICATION_ID, buildNotification(roomId), serviceTypes)
+                mediaProjectionForegroundActive = includeMediaProjection
             } else {
                 startForeground(NOTIFICATION_ID, buildNotification(roomId))
+                mediaProjectionForegroundActive = false
             }
         }
         return START_NOT_STICKY
     }
 
+    override fun onDestroy() {
+        mediaProjectionForegroundActive = false
+        super.onDestroy()
+    }
+
     override fun onTaskRemoved(rootIntent: Intent?) {
-        (application as SerenadaApp).callManager.endCall()
+        (application as SerenadaApp).callManager.leaveCall()
         stopSelf()
     }
 
@@ -81,11 +91,17 @@ class CallService : Service() {
         private const val NOTIFICATION_ID = 42
         private const val ACTION_START = "app.serenada.android.action.START_CALL"
         private const val EXTRA_ROOM_ID = "room_id"
+        private const val EXTRA_INCLUDE_MEDIA_PROJECTION = "include_media_projection"
+        @Volatile
+        private var mediaProjectionForegroundActive = false
 
-        fun start(context: Context, roomId: String) {
+        fun isMediaProjectionForegroundActive(): Boolean = mediaProjectionForegroundActive
+
+        fun start(context: Context, roomId: String, includeMediaProjection: Boolean = false) {
             val intent = Intent(context, CallService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_ROOM_ID, roomId)
+                putExtra(EXTRA_INCLUDE_MEDIA_PROJECTION, includeMediaProjection)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -95,6 +111,7 @@ class CallService : Service() {
         }
 
         fun stop(context: Context) {
+            mediaProjectionForegroundActive = false
             context.stopService(Intent(context, CallService::class.java))
         }
     }

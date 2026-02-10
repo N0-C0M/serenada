@@ -459,11 +459,13 @@ class CallManager(context: Context) {
 
     fun startScreenShare(intent: Intent) {
         if (_uiState.value.isScreenSharing) return
-        if (!webRtcEngine.startScreenShare(intent)) {
-            Log.w("CallManager", "Failed to start screen sharing")
+        val roomId = currentRoomId
+        if (roomId == null) {
+            Log.w("CallManager", "Failed to start screen sharing: roomId is missing")
             return
         }
-        updateState(_uiState.value.copy(isScreenSharing = true))
+        CallService.start(appContext, roomId, includeMediaProjection = true)
+        startScreenShareWhenForegroundReady(intent, roomId, attemptsRemaining = 15)
     }
 
     fun stopScreenShare() {
@@ -472,7 +474,35 @@ class CallManager(context: Context) {
             Log.w("CallManager", "Failed to stop screen sharing")
             return
         }
+        currentRoomId?.let { roomId ->
+            CallService.start(appContext, roomId)
+        }
         updateState(_uiState.value.copy(isScreenSharing = false))
+    }
+
+    private fun startScreenShareWhenForegroundReady(
+        intent: Intent,
+        roomId: String,
+        attemptsRemaining: Int
+    ) {
+        if (CallService.isMediaProjectionForegroundActive()) {
+            if (!webRtcEngine.startScreenShare(intent)) {
+                CallService.start(appContext, roomId)
+                Log.w("CallManager", "Failed to start screen sharing")
+                return
+            }
+            updateState(_uiState.value.copy(isScreenSharing = true))
+            return
+        }
+        if (attemptsRemaining <= 0) {
+            CallService.start(appContext, roomId)
+            Log.w("CallManager", "Failed to start screen sharing: media projection foreground type not ready")
+            return
+        }
+        handler.postDelayed(
+            { startScreenShareWhenForegroundReady(intent, roomId, attemptsRemaining - 1) },
+            50
+        )
     }
 
     fun attachLocalRenderer(

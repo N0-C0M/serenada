@@ -296,7 +296,7 @@ fun SerenadaAppRoot(
                         onToggleVideo = { callManager.toggleVideo() },
                         onFlipCamera = { callManager.flipCamera() },
                         onToggleFlashlight = { callManager.toggleFlashlight() },
-                        onEndCall = { callManager.endCall() },
+                        onEndCall = { callManager.leaveCall() },
                         onStartScreenShare = { intent -> callManager.startScreenShare(intent) },
                         onStopScreenShare = { callManager.stopScreenShare() },
                         attachLocalRenderer = { renderer, events ->
