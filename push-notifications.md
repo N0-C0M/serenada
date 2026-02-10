@@ -5,7 +5,6 @@
 - Keep the server blind to snapshot contents (no plaintext stored or processed).
 - Preserve multi-subscriber delivery (one snapshot can be shared across multiple recipients).
 - Keep snapshots short-lived (10 minute TTL).
-- Keep push flow independent from in-call camera source modes (including Android composite mode).
 
 ## Architecture (Server-blind)
 ### Key material (per subscriber)

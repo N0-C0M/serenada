@@ -1,6 +1,8 @@
 package app.serenada.android.call
 
 import android.content.Context
+import android.hardware.camera2.CameraManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -61,6 +63,8 @@ class WebRtcEngine(
     private var audioSource: AudioSource? = null
     private var surfaceTextureHelper: SurfaceTextureHelper? = null
     private var currentCameraSource = LocalCameraSource.SELFIE
+    private var compositeSupportCache: Pair<Pair<String, String>, Boolean>? = null
+    private var compositeDisabledAfterFailure = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private var localSink: VideoSink? = null
@@ -180,16 +184,21 @@ class WebRtcEngine(
 
     fun flipCamera() {
         if (videoSource == null) return
-        val target = when (currentCameraSource) {
+        var target = when (currentCameraSource) {
             LocalCameraSource.SELFIE -> LocalCameraSource.WORLD
             LocalCameraSource.WORLD -> LocalCameraSource.COMPOSITE
             LocalCameraSource.COMPOSITE -> LocalCameraSource.SELFIE
+        }
+        if (target == LocalCameraSource.COMPOSITE && !canUseCompositeSource()) {
+            Log.w("WebRtcEngine", "Composite source unavailable; skipping to ${LocalCameraSource.SELFIE}")
+            target = LocalCameraSource.SELFIE
         }
         if (restartVideoCapturer(target)) {
             return
         }
         Log.w("WebRtcEngine", "Failed to switch camera source to $target")
         val fallback = if (target == LocalCameraSource.COMPOSITE) {
+            compositeDisabledAfterFailure = true
             LocalCameraSource.SELFIE
         } else {
             currentCameraSource
@@ -621,6 +630,8 @@ class WebRtcEngine(
             LocalCameraSource.COMPOSITE -> {
                 if (front == null || back == null) {
                     null
+                } else if (!canUseCompositeSource(frontDevice = front, backDevice = back)) {
+                    null
                 } else {
                     val mainCapturer = enumerator.createCapturer(back, null)
                     val overlayCapturer = enumerator.createCapturer(front, null)
@@ -649,11 +660,49 @@ class WebRtcEngine(
         mainHandler.post {
             if (currentCameraSource != LocalCameraSource.COMPOSITE) return@post
             if (videoCapturer !is CompositeCameraCapturer) return@post
-            Log.w("WebRtcEngine", "Composite source failed to start; falling back to selfie")
+            compositeDisabledAfterFailure = true
+            Log.w("WebRtcEngine", "Composite source failed; disabling composite and falling back to selfie")
             if (restartVideoCapturer(LocalCameraSource.SELFIE)) {
                 Log.w("WebRtcEngine", "Camera source fallback applied: ${LocalCameraSource.SELFIE}")
             }
         }
+    }
+
+    private fun canUseCompositeSource(): Boolean {
+        val enumerator = Camera2Enumerator(appContext)
+        val front = enumerator.deviceNames.firstOrNull { enumerator.isFrontFacing(it) } ?: return false
+        val back = enumerator.deviceNames.firstOrNull { enumerator.isBackFacing(it) } ?: return false
+        return canUseCompositeSource(frontDevice = front, backDevice = back)
+    }
+
+    private fun canUseCompositeSource(frontDevice: String, backDevice: String): Boolean {
+        if (compositeDisabledAfterFailure) {
+            return false
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            // API < 30 has no stable concurrent-camera query API, so allow trial.
+            return true
+        }
+        val cacheKey = Pair(frontDevice, backDevice)
+        compositeSupportCache?.let { (savedKey, savedValue) ->
+            if (savedKey == cacheKey) {
+                return savedValue
+            }
+        }
+        val manager = appContext.getSystemService(CameraManager::class.java) ?: return false
+        val supported = runCatching {
+            manager.concurrentCameraIds.any { ids ->
+                ids.contains(frontDevice) && ids.contains(backDevice)
+            }
+        }.getOrDefault(false)
+        compositeSupportCache = Pair(cacheKey, supported)
+        if (!supported) {
+            Log.w(
+                "WebRtcEngine",
+                "Composite source unsupported by concurrent camera constraints. front=$frontDevice back=$backDevice"
+            )
+        }
+        return supported
     }
 
     private fun onRemoteVideoFrame(frame: org.webrtc.VideoFrame) {

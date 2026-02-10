@@ -14,7 +14,7 @@ This repository is production-critical.
 - In `client-android/`, camera source switching is mode-based (`selfie -> world -> composite`) rather than binary front/back flip
 
 ## Documentation
-- Update all relevant documentation when making changes:
+- Update all relevant documentation when making changes. Only update documentation that is directly relevant to the change:
     - README.md - high-level overview for end users, including quick start instructions, description of features, and links to documentation
     - AGENTS.md - instructions for coding agents
     - DEPLOY.md - deployment instructions
