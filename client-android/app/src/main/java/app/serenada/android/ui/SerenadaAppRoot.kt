@@ -7,6 +7,7 @@ import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -14,7 +15,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -47,6 +47,7 @@ fun SerenadaAppRoot(
     val serverHost by callManager.serverHost
     val selectedLanguage by callManager.selectedLanguage
     val recentCalls by callManager.recentCalls
+    val savedRooms by callManager.savedRooms
     val roomStatuses by callManager.roomStatuses
     val context = LocalContext.current
     val showActiveCallScreen =
@@ -222,7 +223,6 @@ fun SerenadaAppRoot(
                         selectedLanguage = selectedLanguage,
                         hostError = settingsHostError,
                         isSaving = settingsSaveInProgress,
-
                         isBackgroundModeEnabled = callManager.isBackgroundModeEnabled.value,
                         isDefaultCameraEnabled = callManager.isDefaultCameraEnabled.value,
                         isDefaultMicrophoneEnabled = callManager.isDefaultMicrophoneEnabled.value,
@@ -231,7 +231,6 @@ fun SerenadaAppRoot(
                         onDefaultCameraChange = { callManager.updateDefaultCamera(it) },
                         onDefaultMicrophoneChange = { callManager.updateDefaultMicrophone(it) },
                         onHdVideoExperimentalChange = { callManager.updateHdVideoExperimental(it) },
-
                         onHostChange = {
                             hostInput = it
                             settingsHostError = null
@@ -324,6 +323,7 @@ fun SerenadaAppRoot(
                         isBusy = uiState.phase == CallPhase.CreatingRoom || uiState.phase == CallPhase.Joining,
                         statusMessage = statusMessage,
                         recentCalls = recentCalls,
+                        savedRooms = savedRooms,
                         roomStatuses = roomStatuses,
                         onOpenJoinWithCode = { showJoinWithCode = true },
                         onOpenSettings = {
@@ -342,6 +342,19 @@ fun SerenadaAppRoot(
                         },
                         onRemoveRecentCall = { roomId ->
                             callManager.removeRecentCall(roomId)
+                        },
+                        onSaveRecentCall = { roomId, name ->
+                            callManager.saveRoom(roomId, name)
+                        },
+                        onJoinSavedRoom = { roomId ->
+                            callManager.updateServerHost(hostInput)
+                            runWithCallPermissions { callManager.joinRoom(roomId) }
+                        },
+                        onRemoveSavedRoom = { roomId ->
+                            callManager.removeSavedRoom(roomId)
+                        },
+                        onRenameSavedRoom = { roomId, newName ->
+                            callManager.renameSavedRoom(roomId, newName)
                         }
                     )
                 }

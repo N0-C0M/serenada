@@ -1,6 +1,8 @@
 <resources>
     <string name="app_name">Serenada</string>
     <string name="common_back">Back</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_save">Save</string>
 
     <string name="settings_title">Settings</string>
     <string name="settings_save">Save</string>
@@ -31,6 +33,15 @@
     <string name="recent_calls_title">Your recent calls</string>
     <string name="recent_calls_at">at</string>
     <string name="recent_calls_remove">Remove</string>
+    <string name="recent_calls_save">Save room</string>
+
+    <string name="saved_rooms_title">Saved rooms</string>
+    <string name="saved_rooms_rename">Rename</string>
+    <string name="saved_rooms_remove">Remove</string>
+    <string name="saved_rooms_dialog_title">Save room</string>
+    <string name="saved_rooms_dialog_rename_title">Rename room</string>
+    <string name="saved_rooms_dialog_placeholder">Name (e.g. John)</string>
+
     <string name="join_with_code_title">Join with a code</string>
     <string name="join_with_code_action">Join</string>
     <string name="join_with_code_hint">Enter the code or link provided by the meeting organizer</string>

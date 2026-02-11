@@ -15,6 +15,8 @@ import androidx.compose.runtime.mutableStateOf
 import app.serenada.android.R
 import app.serenada.android.data.RecentCall
 import app.serenada.android.data.RecentCallStore
+import app.serenada.android.data.SavedRoom
+import app.serenada.android.data.SavedRoomStore
 import app.serenada.android.data.SettingsStore
 import app.serenada.android.i18n.AppLocaleManager
 import app.serenada.android.network.ApiClient
@@ -34,6 +36,7 @@ class CallManager(context: Context) {
     private val apiClient = ApiClient(okHttpClient)
     private val settingsStore = SettingsStore(appContext)
     private val recentCallStore = RecentCallStore(appContext)
+    private val savedRoomStore = SavedRoomStore(appContext)
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
@@ -65,12 +68,14 @@ class CallManager(context: Context) {
     private val _isDefaultMicrophoneEnabled = mutableStateOf(settingsStore.isDefaultMicrophoneEnabled)
     val isDefaultMicrophoneEnabled: State<Boolean> = _isDefaultMicrophoneEnabled
 
-    private val _isHdVideoExperimentalEnabled =
-        mutableStateOf(settingsStore.isHdVideoExperimentalEnabled)
+    private val _isHdVideoExperimentalEnabled = mutableStateOf(settingsStore.isHdVideoExperimentalEnabled)
     val isHdVideoExperimentalEnabled: State<Boolean> = _isHdVideoExperimentalEnabled
 
     private val _recentCalls = mutableStateOf<List<RecentCall>>(emptyList())
     val recentCalls: State<List<RecentCall>> = _recentCalls
+
+    private val _savedRooms = mutableStateOf<List<SavedRoom>>(emptyList())
+    val savedRooms: State<List<SavedRoom>> = _savedRooms
 
     private val _roomStatuses = mutableStateOf<Map<String, Int>>(emptyMap())
     val roomStatuses: State<Map<String, Int>> = _roomStatuses
@@ -175,22 +180,14 @@ class CallManager(context: Context) {
         },
         onFlashlightStateChanged = { available, enabled ->
             handler.post {
-                updateState(
-                    _uiState.value.copy(
-                        isFlashAvailable = available,
-                        isFlashEnabled = enabled
-                    )
-                )
+                updateState(_uiState.value.copy(isFlashAvailable = available, isFlashEnabled = enabled))
             }
         },
         onScreenShareStopped = {
             handler.post {
-                if (_uiState.value.isScreenSharing) {
-                    updateState(_uiState.value.copy(isScreenSharing = false))
-                }
+                updateState(_uiState.value.copy(isScreenSharing = false))
             }
-        },
-        isHdVideoExperimentalEnabled = settingsStore.isHdVideoExperimentalEnabled
+        }
     )
 
     private val signalingClient = SignalingClient(okHttpClient, handler, object : SignalingClient.Listener {
@@ -221,7 +218,8 @@ class CallManager(context: Context) {
 
     init {
         registerConnectivityListener()
-        refreshRecentCalls()
+        refreshStoredData()
+        webRtcEngine.setHdVideoExperimentalEnabled(settingsStore.isHdVideoExperimentalEnabled)
     }
 
     private fun registerConnectivityListener() {
@@ -243,7 +241,7 @@ class CallManager(context: Context) {
         _serverHost.value = trimmed
         if (changed && currentRoomId == null && watchedRoomIds.isNotEmpty()) {
             signalingClient.close()
-            watchRecentRoomsIfNeeded()
+            watchRoomsIfNeeded()
         }
     }
 
@@ -376,7 +374,7 @@ class CallManager(context: Context) {
         sentOffer = false
         pendingMessages.clear()
 
-
+        // Read defaults from settings
         val defaultAudio = settingsStore.isDefaultMicrophoneEnabled
         val defaultVideo = settingsStore.isDefaultCameraEnabled
 
@@ -388,10 +386,7 @@ class CallManager(context: Context) {
                 errorMessageResId = null,
                 errorMessageText = null,
                 localAudioEnabled = defaultAudio,
-                localVideoEnabled = defaultVideo,
-                localCameraMode = LocalCameraMode.SELFIE,
-                isFlashAvailable = false,
-                isFlashEnabled = false
+                localVideoEnabled = defaultVideo
             )
         )
 
@@ -415,13 +410,28 @@ class CallManager(context: Context) {
     fun dismissError() {
         if (_uiState.value.phase == CallPhase.Error) {
             updateState(CallUiState())
-            refreshRecentCalls()
+            refreshStoredData()
         }
     }
 
     fun removeRecentCall(roomId: String) {
         recentCallStore.removeCall(roomId)
-        refreshRecentCalls()
+        refreshStoredData()
+    }
+
+    fun saveRoom(roomId: String, name: String) {
+        savedRoomStore.saveRoom(SavedRoom(roomId, name))
+        refreshStoredData()
+    }
+
+    fun removeSavedRoom(roomId: String) {
+        savedRoomStore.removeRoom(roomId)
+        refreshStoredData()
+    }
+
+    fun renameSavedRoom(roomId: String, newName: String) {
+        savedRoomStore.renameRoom(roomId, newName)
+        refreshStoredData()
     }
 
     fun endCall() {
@@ -446,10 +456,6 @@ class CallManager(context: Context) {
         updateState(_uiState.value.copy(localVideoEnabled = enabled))
     }
 
-    fun toggleFlashlight() {
-        webRtcEngine.toggleFlashlight()
-    }
-
     fun flipCamera() {
         // Can only flip if not screen sharing
         if (!_uiState.value.isScreenSharing) {
@@ -457,52 +463,22 @@ class CallManager(context: Context) {
         }
     }
 
+    fun toggleFlashlight() {
+        webRtcEngine.toggleFlashlight()
+    }
+
     fun startScreenShare(intent: Intent) {
         if (_uiState.value.isScreenSharing) return
-        val roomId = currentRoomId
-        if (roomId == null) {
-            Log.w("CallManager", "Failed to start screen sharing: roomId is missing")
-            return
+        if (webRtcEngine.startScreenShare(intent)) {
+            updateState(_uiState.value.copy(isScreenSharing = true))
         }
-        CallService.start(appContext, roomId, includeMediaProjection = true)
-        startScreenShareWhenForegroundReady(intent, roomId, attemptsRemaining = 15)
     }
 
     fun stopScreenShare() {
         if (!_uiState.value.isScreenSharing) return
-        if (!webRtcEngine.stopScreenShare()) {
-            Log.w("CallManager", "Failed to stop screen sharing")
-            return
+        if (webRtcEngine.stopScreenShare()) {
+            updateState(_uiState.value.copy(isScreenSharing = false))
         }
-        currentRoomId?.let { roomId ->
-            CallService.start(appContext, roomId)
-        }
-        updateState(_uiState.value.copy(isScreenSharing = false))
-    }
-
-    private fun startScreenShareWhenForegroundReady(
-        intent: Intent,
-        roomId: String,
-        attemptsRemaining: Int
-    ) {
-        if (CallService.isMediaProjectionForegroundActive()) {
-            if (!webRtcEngine.startScreenShare(intent)) {
-                CallService.start(appContext, roomId)
-                Log.w("CallManager", "Failed to start screen sharing")
-                return
-            }
-            updateState(_uiState.value.copy(isScreenSharing = true))
-            return
-        }
-        if (attemptsRemaining <= 0) {
-            CallService.start(appContext, roomId)
-            Log.w("CallManager", "Failed to start screen sharing: media projection foreground type not ready")
-            return
-        }
-        handler.postDelayed(
-            { startScreenShareWhenForegroundReady(intent, roomId, attemptsRemaining - 1) },
-            50
-        )
     }
 
     fun attachLocalRenderer(
@@ -976,7 +952,8 @@ class CallManager(context: Context) {
                 statusMessageResId = messageResId
             )
         )
-        saveCurrentCallToHistoryIfNeeded()
+
+        // Ensure screen share is stopped when call ends
         if (uiState.value.isScreenSharing) {
             webRtcEngine.stopScreenShare()
         }
@@ -984,7 +961,7 @@ class CallManager(context: Context) {
         settingsStore.reconnectCid = null
         resetResources()
         updateState(CallUiState(phase = CallPhase.Idle))
-        watchRecentRoomsIfNeeded()
+        watchRoomsIfNeeded()
     }
 
     private fun resetResources() {
@@ -1026,16 +1003,22 @@ class CallManager(context: Context) {
         }, backoff)
     }
 
-    private fun refreshRecentCalls() {
+    private fun refreshStoredData() {
         val calls = recentCallStore.getRecentCalls()
         _recentCalls.value = calls
-        watchedRoomIds = calls.map { it.roomId }
+        
+        val saved = savedRoomStore.getSavedRooms()
+        _savedRooms.value = saved
+
+        watchedRoomIds = (calls.map { it.roomId } + saved.map { it.roomId }).distinct()
+        
         val watched = watchedRoomIds.toSet()
         _roomStatuses.value = _roomStatuses.value.filterKeys { watched.contains(it) }
-        watchRecentRoomsIfNeeded()
+        
+        watchRoomsIfNeeded()
     }
 
-    private fun watchRecentRoomsIfNeeded() {
+    private fun watchRoomsIfNeeded() {
         if (watchedRoomIds.isEmpty()) {
             if (currentRoomId == null && signalingClient.isConnected()) {
                 signalingClient.close()
@@ -1047,22 +1030,5 @@ class CallManager(context: Context) {
         } else {
             signalingClient.connect(serverHost.value)
         }
-    }
-
-    private fun saveCurrentCallToHistoryIfNeeded() {
-        val roomId = currentRoomId ?: return
-        val startTime = callStartTimeMs ?: return
-        val durationSeconds = ((System.currentTimeMillis() - startTime) / 1000L)
-            .coerceAtLeast(0L)
-            .toInt()
-        recentCallStore.saveCall(
-            RecentCall(
-                roomId = roomId,
-                startTime = startTime,
-                durationSeconds = durationSeconds
-            )
-        )
-        callStartTimeMs = null
-        refreshRecentCalls()
     }
 }
