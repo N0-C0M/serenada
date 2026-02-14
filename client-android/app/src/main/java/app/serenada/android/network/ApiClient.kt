@@ -100,6 +100,38 @@ class ApiClient(private val okHttpClient: OkHttpClient) {
         })
     }
 
+    fun fetchDiagnosticToken(host: String, onResult: (Result<String>) -> Unit) {
+        val url = buildHttpsUrl(host, "/api/diagnostic-token")
+        if (url == null) {
+            onResult(Result.failure(IllegalArgumentException("Invalid host")))
+            return
+        }
+        val requestBody = "".toRequestBody("application/json".toMediaType())
+        val request = Request.Builder()
+            .url(url)
+            .post(requestBody)
+            .build()
+        okHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                onResult(Result.failure(e))
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (!response.isSuccessful) {
+                        onResult(Result.failure(IOException("Diagnostic token failed: ${response.code}")))
+                        return
+                    }
+                    val body = response.body?.string().orEmpty()
+                    parseDiagnosticToken(body).fold(
+                        onSuccess = { onResult(Result.success(it)) },
+                        onFailure = { onResult(Result.failure(it)) }
+                    )
+                }
+            }
+        })
+    }
+
     private fun parseRoomId(body: String): Result<String> {
         return try {
             val json = JSONObject(body)
@@ -137,6 +169,19 @@ class ApiClient(private val okHttpClient: OkHttpClient) {
             }
         } catch (_: Exception) {
             Result.failure(IOException("Invalid TURN credentials response"))
+        }
+    }
+
+    private fun parseDiagnosticToken(body: String): Result<String> {
+        return try {
+            val token = JSONObject(body).optString("token", "")
+            if (token.isBlank()) {
+                Result.failure(IOException("Diagnostic token missing in response"))
+            } else {
+                Result.success(token)
+            }
+        } catch (_: Exception) {
+            Result.failure(IOException("Invalid diagnostic token response"))
         }
     }
 

@@ -33,6 +33,7 @@ private enum class RootScreen {
     Join,
     JoinWithCode,
     Settings,
+    Diagnostics,
     Call,
     Error
 }
@@ -61,6 +62,7 @@ fun SerenadaAppRoot(
     var settingsHostError by rememberSaveable { mutableStateOf<String?>(null) }
     var settingsSaveInProgress by rememberSaveable { mutableStateOf(false) }
     var showJoinWithCode by rememberSaveable { mutableStateOf(false) }
+    var showDiagnostics by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(serverHost) {
         hostInput = serverHost
@@ -77,6 +79,7 @@ fun SerenadaAppRoot(
         if (showActiveCallScreen) {
             showJoinWithCode = false
             showSettings = false
+            showDiagnostics = false
             roomInput = ""
         }
     }
@@ -153,6 +156,7 @@ fun SerenadaAppRoot(
         val errorMessage = uiState.errorMessageResId?.let { stringResource(it) } ?: uiState.errorMessageText
         val hasError = !errorMessage.isNullOrBlank()
         val currentScreen = when {
+            showDiagnostics -> RootScreen.Diagnostics
             showSettings -> RootScreen.Settings
             showJoinWithCode -> RootScreen.JoinWithCode
             showActiveCallScreen -> RootScreen.Call
@@ -231,6 +235,9 @@ fun SerenadaAppRoot(
                         onDefaultCameraChange = { callManager.updateDefaultCamera(it) },
                         onDefaultMicrophoneChange = { callManager.updateDefaultMicrophone(it) },
                         onHdVideoExperimentalChange = { callManager.updateHdVideoExperimental(it) },
+                        onOpenDiagnostics = {
+                            showDiagnostics = true
+                        },
 
                         onHostChange = {
                             hostInput = it
@@ -259,8 +266,15 @@ fun SerenadaAppRoot(
                             hostInput = serverHost
                             settingsHostError = null
                             settingsSaveInProgress = false
+                            showDiagnostics = false
                             showSettings = false
                         }
+                    )
+                }
+                RootScreen.Diagnostics -> {
+                    DiagnosticsScreen(
+                        host = hostInput,
+                        onBack = { showDiagnostics = false }
                     )
                 }
                 RootScreen.JoinWithCode -> {
@@ -330,6 +344,7 @@ fun SerenadaAppRoot(
                             hostInput = serverHost
                             settingsHostError = null
                             settingsSaveInProgress = false
+                            showDiagnostics = false
                             showSettings = true
                         },
                         onStartCall = {

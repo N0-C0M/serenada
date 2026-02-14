@@ -6,8 +6,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -75,6 +77,7 @@ fun SettingsScreen(
     onDefaultCameraChange: (Boolean) -> Unit,
     onDefaultMicrophoneChange: (Boolean) -> Unit,
     onHdVideoExperimentalChange: (Boolean) -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit
 ) {
@@ -165,7 +168,9 @@ fun SettingsScreen(
                     )
 
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
@@ -197,7 +202,9 @@ fun SettingsScreen(
                                     isPinging = false
                                 }
                             },
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
                             enabled = !isPinging
                         ) {
                             if (isPinging) {
@@ -213,11 +220,11 @@ fun SettingsScreen(
 
                         OutlinedButton(
                             onClick = {
-                                val targetUrl =
-                                    if (host.startsWith("http")) "$host/device-check" else "https://$host/device-check"
-                                uriHandler.openUri(targetUrl)
+                                onOpenDiagnostics()
                             },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
                         ) {
                             Text(stringResource(R.string.settings_device_check))
                         }

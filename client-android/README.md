@@ -146,6 +146,12 @@ adb shell am start -a android.intent.action.VIEW -d "https://serenada.app/call/R
 Server host is configurable in the in-app Settings screen (Join screen → Settings).
 On Save, the app validates `https://<host>/api/room-id` and only persists hosts that respond with the expected Serenada room ID payload.
 `Call defaults` also include `HD Video (experimental)`; when disabled (default), camera capture uses legacy `640x480`, and when enabled the app applies higher per-mode camera/composite targets.
+`Device Check` in Settings opens a native diagnostics screen with:
+- Runtime permission checks (`CAMERA`, `RECORD_AUDIO`, `POST_NOTIFICATIONS` on Android 13+)
+- Audio/video capability inspection (camera inventory, composite prerequisites, audio processing feature availability)
+- Connectivity checks (`/api/room-id`, WebSocket `/ws`, `/api/diagnostic-token`, `/api/turn-credentials`)
+- ICE tests for full STUN/TURN and TURNS-only modes
+- Title-bar share action that copies the full diagnostic report to clipboard and opens Android share sheet
 
 ## Known limitations
 - WebSocket signaling only
