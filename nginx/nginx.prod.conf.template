@@ -37,6 +37,24 @@ http {
         default $request_uri;
     }
 
+    # SEO policy:
+    # - serenada.app is canonical and indexable
+    # - any other host is treated as a mirror and marked noindex
+    map $host $robots_tag {
+        serenada.app "index, follow";
+        default "noindex, follow";
+    }
+
+    map $host $robots_txt_body {
+        serenada.app "User-agent: *\nAllow: /\nSitemap: https://serenada.app/sitemap.xml\n";
+        default "User-agent: *\nAllow: /\n";
+    }
+
+    map $request_uri $canonical_uri {
+        ~^([^?]+) $1;
+        default /;
+    }
+
     log_format main '$remote_addr - $remote_user [$time_local] '
                     '"$request_method $log_request_uri $server_protocol" '
                     '$status $body_bytes_sent "$http_referer" '
@@ -81,17 +99,21 @@ http {
         add_header Cross-Origin-Opener-Policy "same-origin" always;
         add_header Cross-Origin-Resource-Policy "same-site" always;
         add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: wss: turn: stun:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; worker-src 'self' blob:;" always;
+        add_header X-Robots-Tag $robots_tag always;
+        add_header Link "<https://serenada.app$canonical_uri>; rel=\"canonical\"" always;
 
         root /var/www/serenada/dist;
         index index.html;
 
         location = /robots.txt {
-            add_header Content-Type text/plain;
-            return 200 "User-agent: *\nAllow: /\n";
+            default_type text/plain;
+            return 200 $robots_txt_body;
         }
 
         location = /index.html {
             add_header Cache-Control "no-store";
+            add_header X-Robots-Tag $robots_tag always;
+            add_header Link "<https://serenada.app$canonical_uri>; rel=\"canonical\"" always;
             try_files $uri =404;
         }
 

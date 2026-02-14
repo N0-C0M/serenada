@@ -44,6 +44,17 @@ Serenada uses templates to generate final configuration files during deployment.
 - [nginx.prod.conf.template](nginx/nginx.prod.conf.template)
 - [turnserver.prod.conf.template](coturn/turnserver.prod.conf.template)
 
+#### Canonical Domain and Mirrors
+Production Nginx applies a host-based SEO policy:
+- `serenada.app` is treated as the canonical domain (`index, follow`).
+- Any other domain is treated as a mirror (`noindex, follow`).
+- Canonical hints are sent as:
+  - HTML canonical tag in `client/index.html` (`https://serenada.app/`)
+  - HTTP `Link: <https://serenada.app<request-path>>; rel="canonical"` response header
+- `robots.txt` is host-aware:
+  - Canonical host includes `Sitemap: https://serenada.app/sitemap.xml`
+  - Mirror hosts omit sitemap entries
+
 ### 2. Firewall
 
 Ensure the following ports are open on your VPS firewall (e.g., UFW or Hetzner Cloud Firewall):
@@ -108,3 +119,11 @@ If you need to support redirects from old domains (e.g. `connected.dowhile.fun`)
     {"roomId":"..."}
     ```
 4.  Check logs if issues arise: `docker compose logs -f`.
+5.  Verify canonical/mirror SEO headers:
+    ```bash
+    # Canonical domain should be indexable
+    curl -sI https://serenada.app | rg -i "x-robots-tag|link"
+
+    # Mirror domain should be noindex
+    curl -sI https://your-mirror-domain.example | rg -i "x-robots-tag|link"
+    ```
