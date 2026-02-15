@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,6 +23,7 @@ type PushService struct {
 	db         *sql.DB
 	privateKey string
 	publicKey  string
+	fcm        *FCMService
 	mu         sync.RWMutex
 }
 
@@ -31,8 +33,9 @@ type VAPIDKeys struct {
 }
 
 type PushSubscriptionRequest struct {
-	Endpoint string `json:"endpoint"`
-	Keys     struct {
+	Transport string `json:"transport"`
+	Endpoint  string `json:"endpoint"`
+	Keys      struct {
 		Auth   string `json:"auth"`
 		P256dh string `json:"p256dh"`
 	} `json:"keys"`
@@ -70,6 +73,23 @@ type SnapshotMeta struct {
 }
 
 var pushService *PushService
+
+const (
+	pushTransportWebPush = "webpush"
+	pushTransportFCM     = "fcm"
+)
+
+func normalizePushTransport(input string) string {
+	transport := strings.TrimSpace(strings.ToLower(input))
+	switch transport {
+	case "", pushTransportWebPush:
+		return pushTransportWebPush
+	case pushTransportFCM:
+		return pushTransportFCM
+	default:
+		return ""
+	}
+}
 
 func getDataDir() string {
 	dataDir := os.Getenv("DATA_DIR")
@@ -111,6 +131,7 @@ func InitPushService() error {
 	CREATE TABLE IF NOT EXISTS subscriptions (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		room_id TEXT NOT NULL,
+		transport TEXT NOT NULL DEFAULT 'webpush',
 		endpoint TEXT NOT NULL,
 		auth TEXT NOT NULL,
 		p256dh TEXT NOT NULL,
@@ -128,6 +149,8 @@ func InitPushService() error {
 	// Ignore error if column exists
 	_, _ = db.Exec("ALTER TABLE subscriptions ADD COLUMN locale TEXT DEFAULT 'en'")
 	_, _ = db.Exec("ALTER TABLE subscriptions ADD COLUMN enc_pubkey TEXT")
+	_, _ = db.Exec("ALTER TABLE subscriptions ADD COLUMN transport TEXT DEFAULT 'webpush'")
+	_, _ = db.Exec("UPDATE subscriptions SET transport = 'webpush' WHERE transport IS NULL OR transport = ''")
 
 	// 2. Setup VAPID Keys
 	keys, err := loadOrGenerateVAPIDKeys()
@@ -135,10 +158,16 @@ func InitPushService() error {
 		return fmt.Errorf("failed to setup VAPID keys: %v", err)
 	}
 
+	fcmService, err := initFCMServiceFromEnv()
+	if err != nil {
+		return fmt.Errorf("failed to setup FCM service: %v", err)
+	}
+
 	pushService = &PushService{
 		db:         db,
 		privateKey: keys.PrivateKey,
 		publicKey:  keys.PublicKey,
+		fcm:        fcmService,
 	}
 
 	log.Printf("[PUSH] PushService initialized with SQLite persistence at %s", dbPath)
@@ -182,7 +211,18 @@ func (s *PushService) GetVAPIDPublicKey() string {
 }
 
 func (s *PushService) Subscribe(roomID string, sub PushSubscriptionRequest) error {
-	stmt, err := s.db.Prepare("INSERT OR REPLACE INTO subscriptions(room_id, endpoint, auth, p256dh, locale, enc_pubkey, created_at) VALUES(?, ?, ?, ?, ?, ?, ?)")
+	transport := normalizePushTransport(sub.Transport)
+	if transport == "" {
+		return fmt.Errorf("unsupported push transport")
+	}
+
+	auth := strings.TrimSpace(sub.Keys.Auth)
+	p256dh := strings.TrimSpace(sub.Keys.P256dh)
+	if transport == pushTransportWebPush && (auth == "" || p256dh == "") {
+		return fmt.Errorf("missing webpush key material")
+	}
+
+	stmt, err := s.db.Prepare("INSERT OR REPLACE INTO subscriptions(room_id, transport, endpoint, auth, p256dh, locale, enc_pubkey, created_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?)")
 	if err != nil {
 		return err
 	}
@@ -198,12 +238,12 @@ func (s *PushService) Subscribe(roomID string, sub PushSubscriptionRequest) erro
 		encKey = ""
 	}
 
-	_, err = stmt.Exec(roomID, sub.Endpoint, sub.Keys.Auth, sub.Keys.P256dh, locale, encKey, time.Now().UnixMilli())
+	_, err = stmt.Exec(roomID, transport, sub.Endpoint, auth, p256dh, locale, encKey, time.Now().UnixMilli())
 	if err != nil {
 		log.Printf("[PUSH] Failed to save subscription: %v", err)
 		return err
 	}
-	log.Printf("[PUSH] Subscribed endpoint %s to room %s (locale: %s)", sub.Endpoint, roomID, locale)
+	log.Printf("[PUSH] Subscribed endpoint %s to room %s (transport: %s, locale: %s)", sub.Endpoint, roomID, transport, locale)
 	return nil
 }
 
@@ -223,7 +263,7 @@ func (s *PushService) Unsubscribe(roomID string, endpoint string) error {
 }
 
 func (s *PushService) SendNotificationToRoom(roomID string, excludeEndpoint string, snapshotID string) {
-	rows, err := s.db.Query("SELECT id, endpoint, auth, p256dh, locale FROM subscriptions WHERE room_id = ?", roomID)
+	rows, err := s.db.Query("SELECT id, endpoint, auth, p256dh, locale, COALESCE(transport, 'webpush') FROM subscriptions WHERE room_id = ?", roomID)
 	if err != nil {
 		log.Printf("[PUSH] Failed to query subscriptions for room %s: %v", roomID, err)
 		return
@@ -231,17 +271,18 @@ func (s *PushService) SendNotificationToRoom(roomID string, excludeEndpoint stri
 	defer rows.Close()
 
 	type subData struct {
-		ID       int
-		Endpoint string
-		Auth     string
-		P256dh   string
-		Locale   string
+		ID        int
+		Endpoint  string
+		Auth      string
+		P256dh    string
+		Locale    string
+		Transport string
 	}
 	var targets []subData
 
 	for rows.Next() {
 		var sd subData
-		if err := rows.Scan(&sd.ID, &sd.Endpoint, &sd.Auth, &sd.P256dh, &sd.Locale); err != nil {
+		if err := rows.Scan(&sd.ID, &sd.Endpoint, &sd.Auth, &sd.P256dh, &sd.Locale, &sd.Transport); err != nil {
 			log.Printf("[PUSH] Scan error: %v", err)
 			continue
 		}
@@ -290,20 +331,57 @@ func getLocalizedMessage(locale string) (string, string) {
 	}
 }
 
+func configuredPushHost() string {
+	// Prefer deployment/domain fallbacks.
+	candidates := []string{
+		os.Getenv("DOMAIN"),
+		os.Getenv("STUN_HOST"),
+	}
+	for _, candidate := range candidates {
+		if normalized := normalizePushHost(candidate); normalized != "" {
+			return normalized
+		}
+	}
+	return ""
+}
+
+func normalizePushHost(raw string) string {
+	normalized := strings.TrimSpace(raw)
+	if normalized == "" {
+		return ""
+	}
+	if strings.HasPrefix(normalized, "http://") || strings.HasPrefix(normalized, "https://") {
+		if parsed, err := url.Parse(normalized); err == nil && parsed.Host != "" {
+			normalized = parsed.Host
+		}
+	}
+	normalized = strings.TrimSpace(normalized)
+	normalized = strings.TrimSuffix(normalized, "/")
+	if slash := strings.IndexRune(normalized, '/'); slash >= 0 {
+		normalized = normalized[:slash]
+	}
+	return strings.TrimSpace(normalized)
+}
+
 func (s *PushService) sendOne(roomID string, target struct {
-	ID       int
-	Endpoint string
-	Auth     string
-	P256dh   string
-	Locale   string
+	ID        int
+	Endpoint  string
+	Auth      string
+	P256dh    string
+	Locale    string
+	Transport string
 }, snapshotID string, snapshotMeta *SnapshotMeta) {
 	title, body := getLocalizedMessage(target.Locale)
+	host := configuredPushHost()
 
 	// Payload
 	payload := map[string]string{
 		"title": title,
 		"body":  body,
 		"url":   fmt.Sprintf("/call/%s", roomID),
+	}
+	if host != "" {
+		payload["host"] = host
 	}
 
 	if snapshotID != "" && snapshotMeta != nil {
@@ -320,13 +398,23 @@ func (s *PushService) sendOne(roomID string, target struct {
 		}
 	}
 
+	transport := normalizePushTransport(target.Transport)
+	switch transport {
+	case pushTransportFCM:
+		s.sendOneFCM(roomID, target.Endpoint, payload)
+	default:
+		s.sendOneWebPush(roomID, target.Endpoint, target.Auth, target.P256dh, payload)
+	}
+}
+
+func (s *PushService) sendOneWebPush(roomID string, endpoint string, auth string, p256dh string, payload map[string]string) {
 	payloadBytes, _ := json.Marshal(payload)
 
 	sub := &webpush.Subscription{
-		Endpoint: target.Endpoint,
+		Endpoint: endpoint,
 		Keys: webpush.Keys{
-			Auth:   target.Auth,
-			P256dh: target.P256dh,
+			Auth:   auth,
+			P256dh: p256dh,
 		},
 	}
 
@@ -340,20 +428,46 @@ func (s *PushService) sendOne(roomID string, target struct {
 		TTL:             60, // 1 minute TTL
 	})
 	if err != nil {
-		log.Printf("[PUSH] Failed to send to %s: %v", target.Endpoint, err)
+		log.Printf("[PUSH] Failed to send web push to %s: %v", endpoint, err)
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == 201 || resp.StatusCode == 200 {
-		log.Printf("[PUSH] Successfully sent notification to %s (Status %d)", target.Endpoint, resp.StatusCode)
+		log.Printf("[PUSH] Successfully sent web push to %s (Status %d)", endpoint, resp.StatusCode)
 	} else if resp.StatusCode == 410 || resp.StatusCode == 404 {
 		// Subscription is gone, remove it
-		log.Printf("[PUSH] Subscription expired/gone (Status %d). Removing %s", resp.StatusCode, target.Endpoint)
-		s.Unsubscribe(roomID, target.Endpoint)
+		log.Printf("[PUSH] Webpush subscription expired/gone (Status %d). Removing %s", resp.StatusCode, endpoint)
+		s.Unsubscribe(roomID, endpoint)
 	} else {
-		log.Printf("[PUSH] Unexpected response from push service: Status %d", resp.StatusCode)
+		log.Printf("[PUSH] Unexpected response from web push service: Status %d", resp.StatusCode)
 	}
+}
+
+func (s *PushService) sendOneFCM(roomID string, token string, payload map[string]string) {
+	if s.fcm == nil {
+		log.Printf("[PUSH] FCM is not configured; skipping token %s", token)
+		return
+	}
+
+	statusCode, body, err := s.fcm.SendDataMessage(token, payload)
+	if err != nil {
+		log.Printf("[PUSH] Failed to send FCM push to %s: %v", token, err)
+		return
+	}
+
+	if statusCode >= 200 && statusCode < 300 {
+		log.Printf("[PUSH] Successfully sent FCM push to %s (Status %d)", token, statusCode)
+		return
+	}
+
+	if isFCMTokenInvalid(statusCode, body) {
+		log.Printf("[PUSH] FCM token invalid (Status %d). Removing %s", statusCode, token)
+		_ = s.Unsubscribe(roomID, token)
+		return
+	}
+
+	log.Printf("[PUSH] Unexpected FCM response (Status %d): %s", statusCode, strings.TrimSpace(string(body)))
 }
 
 func isSafeSnapshotID(id string) bool {
@@ -433,6 +547,21 @@ func handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid body", http.StatusBadRequest)
 			return
 		}
+		if strings.TrimSpace(sub.Endpoint) == "" {
+			http.Error(w, "Missing endpoint", http.StatusBadRequest)
+			return
+		}
+		transport := normalizePushTransport(sub.Transport)
+		if transport == "" {
+			http.Error(w, "Unsupported push transport", http.StatusBadRequest)
+			return
+		}
+		if transport == pushTransportWebPush {
+			if strings.TrimSpace(sub.Keys.Auth) == "" || strings.TrimSpace(sub.Keys.P256dh) == "" {
+				http.Error(w, "Missing webpush key material", http.StatusBadRequest)
+				return
+			}
+		}
 		if len(sub.EncPublicKey) > 4096 {
 			http.Error(w, "Encryption key too large", http.StatusBadRequest)
 			return
@@ -441,6 +570,7 @@ func handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Invalid encryption key", http.StatusBadRequest)
 			return
 		}
+		sub.Transport = transport
 
 		if err := pushService.Subscribe(roomId, sub); err != nil {
 			http.Error(w, "Failed to subscribe", http.StatusInternalServerError)

@@ -6,10 +6,18 @@
 - Preserve multi-subscriber delivery (one snapshot can be shared across multiple recipients).
 - Keep snapshots short-lived (10 minute TTL).
 
+## Client support
+- Snapshot sender on join: web client and native Android client.
+- Push subscription + notification rendering:
+  - Web: service worker (`webpush` transport).
+  - Native Android: Firebase Cloud Messaging (`fcm` transport).
+
 ## Architecture (Server-blind)
 ### Key material (per subscriber)
-- Each device that subscribes to notifications generates an ECDH key pair (P-256) in the browser.
-- The private key is stored in IndexedDB as a CryptoKey. The public key is sent to the server with the subscription.
+- Each subscribing device generates an ECDH key pair (P-256).
+  - Web stores the private key in IndexedDB as a CryptoKey.
+  - Android stores the private key in Android Keystore.
+- The public key is sent to the server with the subscription.
 - The server stores the public key alongside the subscription record (`enc_pubkey`).
 
 ### Snapshot encryption (per join)
@@ -31,6 +39,7 @@
 - Cleanup runs on snapshot upload and removes files older than 10 minutes.
 - Enforces a max ciphertext size of 300KB per snapshot.
 - On join, server sends push notifications that include:
+  - `host` (preferred backend host for deep-link/snapshot fetch routing)
   - `snapshotId`
   - `snapshotIv`
   - `snapshotSalt`
@@ -48,6 +57,12 @@
   - `image` for Android Chrome.
   - `icon` fallback for macOS (Notification Center ignores `image`).
 
+### Native Android recipient
+- Receives FCM data message in `FirebaseMessagingService`.
+- Uses Android Keystore private key + `snapshotEphemeralPubKey` and HKDF salt to unwrap `snapshotKey`.
+- Fetches encrypted snapshot via `/api/push/snapshot/{id}` and decrypts locally.
+- Renders notification with `BigPictureStyle` and deep-links to `/call/{roomId}`.
+
 ## Protocol details
 ### VAPID key
 `GET /api/push/vapid-public-key`
@@ -61,8 +76,19 @@
 
 ```json
 {
+  "transport": "webpush",
   "endpoint": "...",
   "keys": { "auth": "...", "p256dh": "..." },
+  "locale": "en-US",
+  "encPublicKey": { "kty": "EC", "crv": "P-256", "x": "...", "y": "..." }
+}
+```
+
+Android (`fcm`) subscription example:
+```json
+{
+  "transport": "fcm",
+  "endpoint": "<fcm_registration_token>",
   "locale": "en-US",
   "encPublicKey": { "kty": "EC", "crv": "P-256", "x": "...", "y": "..." }
 }
@@ -114,6 +140,7 @@
 {
   "title": "Serenada",
   "body": "Someone joined your call!",
+  "host": "serenada.app",
   "url": "/call/ROOM_ID",
   "snapshotId": "SNAP-...",
   "snapshotIv": "<base64>",
@@ -130,7 +157,15 @@
 - Cleanup runs on snapshot upload and removes files older than 10 minutes.
 - No deletion-on-first-fetch to allow multiple subscribers.
 
+## Server configuration (Android FCM)
+- Configure one of:
+  - `FCM_SERVICE_ACCOUNT_JSON` (full service account JSON string)
+  - `FCM_SERVICE_ACCOUNT_FILE` (path to a service account JSON file)
+- If unset, `fcm` subscriptions are accepted but native Android pushes are skipped server-side.
+- `STUN_HOST` (or `DOMAIN`, if set) is used as the push `host` hint so Android opens/fetches against the originating backend.
+
 ## Limitations
 - macOS Chrome does not render `image` in notifications; we use `icon` as a fallback.
 - If the device lacks the private key or decryption fails, notifications fall back to text-only.
 - Push payload size must remain under service limits; wrapped key data stays small per recipient.
+- Android requires Firebase runtime config in `client-android` (`firebaseAppId`, `firebaseApiKey`, `firebaseProjectId`, `firebaseSenderId` Gradle properties).

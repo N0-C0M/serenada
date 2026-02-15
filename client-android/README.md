@@ -1,20 +1,24 @@
 # Serenada Android Client
 
-Native Android (Kotlin) client for Serenada 1:1 WebRTC calls. This app mirrors the core call flow of the web client and uses WebSocket signaling only (no SSE or push in the current build).
+Native Android (Kotlin) client for Serenada 1:1 WebRTC calls. This app mirrors the core call flow of the web client and uses WebSocket signaling only (no SSE signaling fallback).
 
 ## Features
 - 1:1 WebRTC audio/video calls
 - WebSocket signaling (protocol v1)
 - In-call camera source cycle: `selfie` (default) -> `world` -> `composite` (world view with circular selfie overlay), with automatic composite skip on unsupported devices or composite start failure
 - In-call flashlight toggle shown in the top-right corner only for `world`/`composite` camera modes when the device reports flash support; flashlight turns off automatically when leaving those modes or ending the call, while the user’s flashlight preference is remembered during the same call and reapplied after returning to `world`/`composite`
+- In-call performance locks (partial CPU wake lock + Wi-Fi low-latency lock) to reduce call-time scheduling/network jitter while the call is active
+- Call-scoped audio session management (`MODE_IN_COMMUNICATION` + audio focus request / restore on hangup), with speaker output enabled by default during active calls
+- WebRTC audio path configured with `JavaAudioDeviceModule` (`VOICE_COMMUNICATION`, hardware AEC/NS, low-latency path)
 - Recent calls on home (max 3, deduped) with live room occupancy status and long-press remove
 - Deep links for `https://serenada.app/call/*`
 - Foreground service to keep active calls running in the background
 - Settings screen to change server host, with host validation on save
+- Encrypted join snapshot upload (`snapshotId` on `join`) so server push notifications can include a thumbnail when Android is the joiner
+- Native push receive via Firebase Cloud Messaging, including encrypted snapshot decryption and `BigPicture` notifications in background/terminated app states
 
 ## Not included (current build)
 - SSE signaling fallback
-- Push notifications
 - Multi-party calls
 
 ## Requirements
@@ -65,6 +69,23 @@ cd client-android
 Release output:
 ```
 app/build/outputs/apk/release/app-release.apk
+```
+
+### Firebase push configuration
+Native push receive requires these Gradle properties at build time:
+- `firebaseAppId`
+- `firebaseApiKey`
+- `firebaseProjectId`
+- `firebaseSenderId`
+
+Example:
+```bash
+cd client-android
+./gradlew :app:assembleDebug \
+  -PfirebaseAppId=1:1234567890:android:abc123 \
+  -PfirebaseApiKey=AIza... \
+  -PfirebaseProjectId=your-project-id \
+  -PfirebaseSenderId=1234567890
 ```
 
 ## Install on a physical device
@@ -176,6 +197,5 @@ During active call flows, WebRTC runtime stats are emitted to logcat every ~2s a
 
 ## Known limitations
 - WebSocket signaling only
-- No push notifications
 - No SSE fallback
 - Composite mode depends on device support for concurrent front+back camera capture; unsupported devices fall back to non-composite camera sources

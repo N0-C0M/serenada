@@ -2,6 +2,9 @@ package app.serenada.android.call
 
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkRequest
@@ -21,6 +24,7 @@ import app.serenada.android.data.SettingsStore
 import app.serenada.android.i18n.AppLocaleManager
 import app.serenada.android.network.ApiClient
 import app.serenada.android.network.TurnCredentials
+import app.serenada.android.push.PushSubscriptionManager
 import app.serenada.android.service.CallService
 import okhttp3.OkHttpClient
 import org.json.JSONArray
@@ -28,6 +32,7 @@ import org.json.JSONObject
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CallManager(context: Context) {
     private val appContext = context.applicationContext
@@ -38,6 +43,7 @@ class CallManager(context: Context) {
     private val recentCallStore = RecentCallStore(appContext)
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
     private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
 
@@ -85,6 +91,8 @@ class CallManager(context: Context) {
     private var callStartTimeMs: Long? = null
     private var watchedRoomIds: List<String> = emptyList()
     private var pendingJoinRoom: String? = null
+    private var pendingJoinSnapshotId: String? = null
+    private var joinAttemptSerial = 0L
     private var reconnectAttempts = 0
     private var sentOffer = false
     private var isMakingOffer = false
@@ -98,107 +106,27 @@ class CallManager(context: Context) {
     private val pendingMessages = ArrayDeque<SignalingMessage>()
     private var cpuWakeLock: PowerManager.WakeLock? = null
     private var wifiPerformanceLock: WifiManager.WifiLock? = null
+    private var audioSessionActive = false
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var audioFocusGranted = false
+    private var previousAudioMode = AudioManager.MODE_NORMAL
+    private var previousSpeakerphoneOn = false
+    private var previousMicrophoneMute = false
+    private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        Log.d("CallManager", "Audio focus changed: $focusChange")
+    }
 
-    private val webRtcEngine = WebRtcEngine(
+    private var webRtcEngine = buildWebRtcEngine()
+    private val pushSubscriptionManager = PushSubscriptionManager(
         context = appContext,
-        onLocalIceCandidate = { candidate ->
-            val payload = JSONObject().apply {
-                val candidateJson = JSONObject()
-                candidateJson.put("candidate", candidate.sdp)
-                candidateJson.put("sdpMid", candidate.sdpMid)
-                candidateJson.put("sdpMLineIndex", candidate.sdpMLineIndex)
-                put("candidate", candidateJson)
-            }
-            sendMessage("ice", payload)
-        },
-        onConnectionState = { state ->
-            handler.post {
-                val messageResId = when (state) {
-                    PeerConnection.PeerConnectionState.CONNECTED -> R.string.call_status_connected
-                    PeerConnection.PeerConnectionState.CONNECTING -> R.string.call_status_connecting
-                    PeerConnection.PeerConnectionState.DISCONNECTED -> R.string.call_status_disconnected
-                    PeerConnection.PeerConnectionState.FAILED -> R.string.call_status_connection_failed
-                    PeerConnection.PeerConnectionState.CLOSED -> R.string.call_status_call_ended
-                    else -> null
-                }
-                updateState(_uiState.value.copy(
-                    statusMessageResId = messageResId,
-                    connectionState = state.name
-                ))
-                when (state) {
-                    PeerConnection.PeerConnectionState.CONNECTED -> {
-                        clearIceRestartTimer()
-                        pendingIceRestart = false
-                    }
-                    PeerConnection.PeerConnectionState.DISCONNECTED -> scheduleIceRestart("conn-disconnected", 2000)
-                    PeerConnection.PeerConnectionState.FAILED -> scheduleIceRestart("conn-failed", 0)
-                    else -> {}
-                }
-            }
-        },
-        onIceConnectionState = { state ->
-            handler.post {
-                updateState(_uiState.value.copy(iceConnectionState = state.name))
-                when (state) {
-                    PeerConnection.IceConnectionState.DISCONNECTED -> scheduleIceRestart("ice-disconnected", 2000)
-                    PeerConnection.IceConnectionState.FAILED -> scheduleIceRestart("ice-failed", 0)
-                    PeerConnection.IceConnectionState.CONNECTED,
-                    PeerConnection.IceConnectionState.COMPLETED -> {
-                        clearIceRestartTimer()
-                        pendingIceRestart = false
-                    }
-                    else -> {}
-                }
-            }
-        },
-        onSignalingState = { state ->
-            handler.post {
-                if (state == PeerConnection.SignalingState.STABLE) {
-                    clearOfferTimeout()
-                    if (pendingIceRestart) {
-                        pendingIceRestart = false
-                        triggerIceRestart("pending-retry")
-                    }
-                }
-                updateState(_uiState.value.copy(signalingState = state.name))
-            }
-        },
-        onRenegotiationNeededCallback = {
-            handler.post { maybeSendOffer(force = true, iceRestart = false) }
-        },
-        onRemoteVideoTrack = { _ ->
-            handler.post {
-                refreshRemoteVideoEnabled()
-            }
-        },
-        onCameraFacingChanged = { isFront ->
-            handler.post {
-                updateState(_uiState.value.copy(isFrontCamera = isFront))
-            }
-        },
-        onCameraModeChanged = { mode ->
-            handler.post {
-                updateState(_uiState.value.copy(localCameraMode = mode))
-            }
-        },
-        onFlashlightStateChanged = { available, enabled ->
-            handler.post {
-                updateState(
-                    _uiState.value.copy(
-                        isFlashAvailable = available,
-                        isFlashEnabled = enabled
-                    )
-                )
-            }
-        },
-        onScreenShareStopped = {
-            handler.post {
-                if (_uiState.value.isScreenSharing) {
-                    updateState(_uiState.value.copy(isScreenSharing = false))
-                }
-            }
-        },
-        isHdVideoExperimentalEnabled = settingsStore.isHdVideoExperimentalEnabled
+        apiClient = apiClient,
+        settingsStore = settingsStore
+    )
+    private val joinSnapshotFeature = JoinSnapshotFeature(
+        apiClient = apiClient,
+        handler = handler,
+        attachLocalSink = { sink -> webRtcEngine.attachLocalSink(sink) },
+        detachLocalSink = { sink -> webRtcEngine.detachLocalSink(sink) }
     )
 
     private val signalingClient = SignalingClient(okHttpClient, handler, object : SignalingClient.Listener {
@@ -207,7 +135,7 @@ class CallManager(context: Context) {
             updateState(_uiState.value.copy(isSignalingConnected = true))
             pendingJoinRoom?.let { join ->
                 pendingJoinRoom = null
-                sendJoin(join)
+                sendJoin(join, pendingJoinSnapshotId)
             }
             sendWatchRoomsIfNeeded()
             if (pendingIceRestart) {
@@ -230,6 +158,127 @@ class CallManager(context: Context) {
     init {
         registerConnectivityListener()
         refreshRecentCalls()
+    }
+
+    private fun buildWebRtcEngine(): WebRtcEngine {
+        return WebRtcEngine(
+            context = appContext,
+            onLocalIceCandidate = { candidate ->
+                val payload = JSONObject().apply {
+                    val candidateJson = JSONObject()
+                    candidateJson.put("candidate", candidate.sdp)
+                    candidateJson.put("sdpMid", candidate.sdpMid)
+                    candidateJson.put("sdpMLineIndex", candidate.sdpMLineIndex)
+                    put("candidate", candidateJson)
+                }
+                sendMessage("ice", payload)
+            },
+            onConnectionState = { state ->
+                handler.post {
+                    val messageResId = when (state) {
+                        PeerConnection.PeerConnectionState.CONNECTED -> R.string.call_status_connected
+                        PeerConnection.PeerConnectionState.CONNECTING -> R.string.call_status_connecting
+                        PeerConnection.PeerConnectionState.DISCONNECTED -> R.string.call_status_disconnected
+                        PeerConnection.PeerConnectionState.FAILED -> R.string.call_status_connection_failed
+                        PeerConnection.PeerConnectionState.CLOSED -> R.string.call_status_call_ended
+                        else -> null
+                    }
+                    updateState(
+                        _uiState.value.copy(
+                            statusMessageResId = messageResId,
+                            connectionState = state.name
+                        )
+                    )
+                    when (state) {
+                        PeerConnection.PeerConnectionState.CONNECTED -> {
+                            clearIceRestartTimer()
+                            pendingIceRestart = false
+                        }
+
+                        PeerConnection.PeerConnectionState.DISCONNECTED -> scheduleIceRestart(
+                            "conn-disconnected",
+                            2000
+                        )
+
+                        PeerConnection.PeerConnectionState.FAILED -> scheduleIceRestart("conn-failed", 0)
+                        else -> {}
+                    }
+                }
+            },
+            onIceConnectionState = { state ->
+                handler.post {
+                    updateState(_uiState.value.copy(iceConnectionState = state.name))
+                    when (state) {
+                        PeerConnection.IceConnectionState.DISCONNECTED -> scheduleIceRestart(
+                            "ice-disconnected",
+                            2000
+                        )
+
+                        PeerConnection.IceConnectionState.FAILED -> scheduleIceRestart("ice-failed", 0)
+                        PeerConnection.IceConnectionState.CONNECTED,
+                        PeerConnection.IceConnectionState.COMPLETED -> {
+                            clearIceRestartTimer()
+                            pendingIceRestart = false
+                        }
+
+                        else -> {}
+                    }
+                }
+            },
+            onSignalingState = { state ->
+                handler.post {
+                    if (state == PeerConnection.SignalingState.STABLE) {
+                        clearOfferTimeout()
+                        if (pendingIceRestart) {
+                            pendingIceRestart = false
+                            triggerIceRestart("pending-retry")
+                        }
+                    }
+                    updateState(_uiState.value.copy(signalingState = state.name))
+                }
+            },
+            onRenegotiationNeededCallback = {
+                handler.post { maybeSendOffer(force = true, iceRestart = false) }
+            },
+            onRemoteVideoTrack = { _ ->
+                handler.post {
+                    refreshRemoteVideoEnabled()
+                }
+            },
+            onCameraFacingChanged = { isFront ->
+                handler.post {
+                    updateState(_uiState.value.copy(isFrontCamera = isFront))
+                }
+            },
+            onCameraModeChanged = { mode ->
+                handler.post {
+                    updateState(_uiState.value.copy(localCameraMode = mode))
+                }
+            },
+            onFlashlightStateChanged = { available, enabled ->
+                handler.post {
+                    updateState(
+                        _uiState.value.copy(
+                            isFlashAvailable = available,
+                            isFlashEnabled = enabled
+                        )
+                    )
+                }
+            },
+            onScreenShareStopped = {
+                handler.post {
+                    if (_uiState.value.isScreenSharing) {
+                        updateState(_uiState.value.copy(isScreenSharing = false))
+                    }
+                }
+            },
+            isHdVideoExperimentalEnabled = settingsStore.isHdVideoExperimentalEnabled
+        )
+    }
+
+    private fun recreateWebRtcEngineForNewCall() {
+        runCatching { webRtcEngine.release() }
+        webRtcEngine = buildWebRtcEngine()
     }
 
     private fun registerConnectivityListener() {
@@ -380,10 +429,13 @@ class CallManager(context: Context) {
             return
         }
         currentRoomId = roomId
+        val joinAttemptId = ++joinAttemptSerial
         callStartTimeMs = System.currentTimeMillis()
         sentOffer = false
         pendingMessages.clear()
+        pendingJoinSnapshotId = null
 
+        recreateWebRtcEngineForNewCall()
 
         val defaultAudio = settingsStore.isDefaultMicrophoneEnabled
         val defaultVideo = settingsStore.isDefaultCameraEnabled
@@ -405,6 +457,7 @@ class CallManager(context: Context) {
         )
 
         acquirePerformanceLocks()
+        activateAudioSession()
         webRtcEngine.startLocalMedia()
 
         // Apply defaults immediately after starting media
@@ -412,7 +465,7 @@ class CallManager(context: Context) {
         if (!defaultVideo) webRtcEngine.toggleVideo(false)
 
         startRemoteVideoStatePolling()
-        ensureSignalingConnection()
+        prepareJoinSnapshotAndConnect(roomId, joinAttemptId)
         CallService.start(appContext, roomId)
     }
 
@@ -560,7 +613,7 @@ class CallManager(context: Context) {
         if (signalingClient.isConnected()) {
             if (!roomToJoin.isNullOrBlank()) {
                 pendingJoinRoom = null
-                sendJoin(roomToJoin)
+                sendJoin(roomToJoin, pendingJoinSnapshotId)
             }
             sendWatchRoomsIfNeeded()
             return
@@ -569,22 +622,73 @@ class CallManager(context: Context) {
         signalingClient.connect(serverHost.value)
     }
 
-    private fun sendJoin(roomId: String) {
-        val payload = JSONObject().apply {
-            put("device", "android")
-            put("capabilities", JSONObject().apply { put("trickleIce", true) })
-            val reconnectCid = clientId ?: settingsStore.reconnectCid
-            reconnectCid?.let { put("reconnectCid", it) }
+    private fun sendJoin(roomId: String, snapshotId: String? = null) {
+        val buildPayload = { endpoint: String? ->
+            JSONObject().apply {
+                put("device", "android")
+                put("capabilities", JSONObject().apply { put("trickleIce", true) })
+                val reconnectCid = clientId ?: settingsStore.reconnectCid
+                reconnectCid?.let { put("reconnectCid", it) }
+                endpoint?.trim()?.takeIf { it.isNotBlank() }?.let { put("pushEndpoint", it) }
+                val joinSnapshotId = snapshotId?.ifBlank { null }
+                if (joinSnapshotId != null) {
+                    put("snapshotId", joinSnapshotId)
+                    Log.d("CallManager", "Including snapshotId in join payload")
+                }
+            }
         }
-        val msg = SignalingMessage(
-            type = "join",
-            rid = roomId,
-            sid = null,
-            cid = null,
-            to = null,
-            payload = payload
-        )
-        signalingClient.send(msg)
+        pendingJoinSnapshotId = null
+        val sent = AtomicBoolean(false)
+        fun sendWithEndpoint(endpoint: String?) {
+            if (!sent.compareAndSet(false, true)) return
+            if (currentRoomId != roomId) return
+            if (!signalingClient.isConnected()) return
+            val msg = SignalingMessage(
+                type = "join",
+                rid = roomId,
+                sid = null,
+                cid = null,
+                to = null,
+                payload = buildPayload(endpoint)
+            )
+            signalingClient.send(msg)
+        }
+
+        val fallbackSend = Runnable { sendWithEndpoint(null) }
+        val cachedEndpoint = pushSubscriptionManager.cachedEndpoint()
+        if (!cachedEndpoint.isNullOrBlank()) {
+            sendWithEndpoint(cachedEndpoint)
+            return
+        }
+
+        handler.postDelayed(fallbackSend, JOIN_PUSH_ENDPOINT_WAIT_MS)
+        pushSubscriptionManager.refreshPushEndpoint { endpoint ->
+            handler.post {
+                handler.removeCallbacks(fallbackSend)
+                sendWithEndpoint(endpoint)
+            }
+        }
+    }
+
+    private fun prepareJoinSnapshotAndConnect(roomId: String, joinAttemptId: Long) {
+        joinSnapshotFeature.prepareSnapshotId(
+            host = serverHost.value,
+            roomId = roomId,
+            isVideoEnabled = { _uiState.value.localVideoEnabled },
+            isJoinAttemptActive = { isJoinAttemptActive(roomId, joinAttemptId) }
+        ) { snapshotId ->
+            if (!isJoinAttemptActive(roomId, joinAttemptId)) {
+                return@prepareSnapshotId
+            }
+            pendingJoinSnapshotId = snapshotId
+            ensureSignalingConnection()
+        }
+    }
+
+    private fun isJoinAttemptActive(roomId: String, joinAttemptId: Long): Boolean {
+        return joinAttemptSerial == joinAttemptId &&
+            currentRoomId == roomId &&
+            _uiState.value.phase == CallPhase.Joining
     }
 
     private fun sendMessage(type: String, payload: JSONObject?, to: String? = null) {
@@ -633,6 +737,10 @@ class CallManager(context: Context) {
     private fun handleJoined(msg: SignalingMessage) {
         clientId = msg.cid
         clientId?.let { settingsStore.reconnectCid = it }
+        val joinedRoomId = msg.rid ?: currentRoomId
+        if (!joinedRoomId.isNullOrBlank()) {
+            pushSubscriptionManager.subscribeRoom(joinedRoomId, serverHost.value)
+        }
         val roomState = parseRoomState(msg.payload)
         if (roomState != null) {
             hostCid = roomState.hostCid
@@ -1021,6 +1129,7 @@ class CallManager(context: Context) {
     }
 
     private fun resetResources() {
+        deactivateAudioSession()
         releasePerformanceLocks()
         stopRemoteVideoStatePolling()
         signalingClient.close()
@@ -1031,6 +1140,7 @@ class CallManager(context: Context) {
         clientId = null
         callStartTimeMs = null
         pendingJoinRoom = null
+        pendingJoinSnapshotId = null
         pendingMessages.clear()
         reconnectAttempts = 0
         sentOffer = false
@@ -1038,6 +1148,94 @@ class CallManager(context: Context) {
         pendingIceRestart = false
         clearOfferTimeout()
         clearIceRestartTimer()
+    }
+
+    private fun activateAudioSession() {
+        if (audioSessionActive) return
+        audioSessionActive = true
+        previousAudioMode = audioManager.mode
+        previousSpeakerphoneOn = audioManager.isSpeakerphoneOn
+        previousMicrophoneMute = audioManager.isMicrophoneMute
+        requestAudioFocus()
+        runCatching {
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isMicrophoneMute = false
+            audioManager.isSpeakerphoneOn = true
+        }.onSuccess {
+            Log.d(
+                "CallManager",
+                "Audio session activated (prevMode=$previousAudioMode, focusGranted=$audioFocusGranted)"
+            )
+        }.onFailure { error ->
+            Log.w("CallManager", "Failed to activate audio session", error)
+        }
+    }
+
+    private fun deactivateAudioSession() {
+        if (!audioSessionActive) {
+            abandonAudioFocus()
+            return
+        }
+        audioSessionActive = false
+        runCatching {
+            audioManager.isMicrophoneMute = previousMicrophoneMute
+            audioManager.isSpeakerphoneOn = previousSpeakerphoneOn
+            audioManager.mode = previousAudioMode
+        }.onSuccess {
+            Log.d("CallManager", "Audio session restored (mode=$previousAudioMode)")
+        }.onFailure { error ->
+            Log.w("CallManager", "Failed to restore audio session", error)
+        }
+        abandonAudioFocus()
+    }
+
+    private fun requestAudioFocus() {
+        val granted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val request =
+                audioFocusRequest
+                    ?: AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build()
+                        )
+                        .setAcceptsDelayedFocusGain(false)
+                        .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                        .build()
+                        .also { audioFocusRequest = it }
+            audioManager.requestAudioFocus(request) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        } else {
+            @Suppress("DEPRECATION")
+            audioManager.requestAudioFocus(
+                audioFocusChangeListener,
+                AudioManager.STREAM_VOICE_CALL,
+                AudioManager.AUDIOFOCUS_GAIN
+            ) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        }
+        audioFocusGranted = granted
+        Log.d("CallManager", "Audio focus request granted=$granted")
+    }
+
+    private fun abandonAudioFocus() {
+        if (!audioFocusGranted) return
+        audioFocusGranted = false
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val request = audioFocusRequest
+                if (request != null) {
+                    audioManager.abandonAudioFocusRequest(request)
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.abandonAudioFocus(audioFocusChangeListener)
+            }
+            Unit
+        }.onSuccess {
+            Log.d("CallManager", "Audio focus abandoned")
+        }.onFailure { error ->
+            Log.w("CallManager", "Failed to abandon audio focus", error)
+        }
     }
 
     private fun acquirePerformanceLocks() {
@@ -1160,6 +1358,7 @@ class CallManager(context: Context) {
 
     private companion object {
         const val WEBRTC_STATS_POLL_INTERVAL_MS = 2000L
+        const val JOIN_PUSH_ENDPOINT_WAIT_MS = 250L
         const val CPU_WAKE_LOCK_TAG = "serenada:call-cpu"
         const val WIFI_PERF_LOCK_TAG = "serenada:call-wifi"
     }
