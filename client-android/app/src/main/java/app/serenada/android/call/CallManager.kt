@@ -6,9 +6,11 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkRequest
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
@@ -36,6 +38,8 @@ class CallManager(context: Context) {
     private val recentCallStore = RecentCallStore(appContext)
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    private val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+    private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -92,6 +96,8 @@ class CallManager(context: Context) {
     private var webrtcStatsRequestInFlight = false
     private var lastWebRtcStatsPollAtMs = 0L
     private val pendingMessages = ArrayDeque<SignalingMessage>()
+    private var cpuWakeLock: PowerManager.WakeLock? = null
+    private var wifiPerformanceLock: WifiManager.WifiLock? = null
 
     private val webRtcEngine = WebRtcEngine(
         context = appContext,
@@ -398,6 +404,7 @@ class CallManager(context: Context) {
             )
         )
 
+        acquirePerformanceLocks()
         webRtcEngine.startLocalMedia()
 
         // Apply defaults immediately after starting media
@@ -1014,6 +1021,7 @@ class CallManager(context: Context) {
     }
 
     private fun resetResources() {
+        releasePerformanceLocks()
         stopRemoteVideoStatePolling()
         signalingClient.close()
         webRtcEngine.release()
@@ -1030,6 +1038,64 @@ class CallManager(context: Context) {
         pendingIceRestart = false
         clearOfferTimeout()
         clearIceRestartTimer()
+    }
+
+    private fun acquirePerformanceLocks() {
+        acquireCpuWakeLock()
+        acquireWifiLock()
+    }
+
+    private fun acquireCpuWakeLock() {
+        val lock =
+            cpuWakeLock
+                ?: powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, CPU_WAKE_LOCK_TAG).apply {
+                    setReferenceCounted(false)
+                }.also { cpuWakeLock = it }
+        if (lock.isHeld) return
+        runCatching { lock.acquire() }
+            .onSuccess { Log.d("CallManager", "CPU wake lock acquired") }
+            .onFailure { error -> Log.w("CallManager", "Failed to acquire CPU wake lock", error) }
+    }
+
+    private fun acquireWifiLock() {
+        val manager = wifiManager ?: return
+        @Suppress("DEPRECATION")
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        val lock =
+            wifiPerformanceLock
+                ?: manager.createWifiLock(mode, WIFI_PERF_LOCK_TAG).apply {
+                    setReferenceCounted(false)
+                }.also { wifiPerformanceLock = it }
+        if (lock.isHeld) return
+        runCatching { lock.acquire() }
+            .onSuccess {
+                Log.d(
+                    "CallManager",
+                    "Wi-Fi performance lock acquired (mode=${if (mode == WifiManager.WIFI_MODE_FULL_LOW_LATENCY) "LOW_LATENCY" else "HIGH_PERF"})"
+                )
+            }
+            .onFailure { error -> Log.w("CallManager", "Failed to acquire Wi-Fi performance lock", error) }
+    }
+
+    private fun releasePerformanceLocks() {
+        wifiPerformanceLock?.let { lock ->
+            if (lock.isHeld) {
+                runCatching { lock.release() }
+                    .onSuccess { Log.d("CallManager", "Wi-Fi performance lock released") }
+                    .onFailure { error -> Log.w("CallManager", "Failed to release Wi-Fi performance lock", error) }
+            }
+        }
+        cpuWakeLock?.let { lock ->
+            if (lock.isHeld) {
+                runCatching { lock.release() }
+                    .onSuccess { Log.d("CallManager", "CPU wake lock released") }
+                    .onFailure { error -> Log.w("CallManager", "Failed to release CPU wake lock", error) }
+            }
+        }
     }
 
     private fun scheduleReconnect() {
@@ -1094,5 +1160,7 @@ class CallManager(context: Context) {
 
     private companion object {
         const val WEBRTC_STATS_POLL_INTERVAL_MS = 2000L
+        const val CPU_WAKE_LOCK_TAG = "serenada:call-cpu"
+        const val WIFI_PERF_LOCK_TAG = "serenada:call-wifi"
     }
 }

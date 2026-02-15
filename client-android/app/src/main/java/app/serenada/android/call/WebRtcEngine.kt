@@ -717,8 +717,10 @@ class WebRtcEngine(
             val params = sender.parameters
             val encodings = params.encodings
             if (encodings.isNullOrEmpty()) return
-            encodings[0].maxBitrateBps = 32_000
+            if (encodings[0].maxBitrateBps == null) return
+            encodings[0].maxBitrateBps = null
             sender.setParameters(params)
+            Log.d("WebRtcEngine", "Cleared audio sender max bitrate cap")
         } catch (e: Exception) {
             Log.w("WebRtcEngine", "Failed to apply audio sender parameters", e)
         }
