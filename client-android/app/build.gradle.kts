@@ -47,8 +47,8 @@ android {
         applicationId = "app.serenada.android"
         minSdk = 26
         targetSdk = 34
-        versionCode = 6
-        versionName = "0.1.6"
+        versionCode = 7
+        versionName = "0.1.7"
         buildConfigField("String", "WEBRTC_PROVIDER", "\"$webrtcProvider\"")
         buildConfigField("String", "FIREBASE_APP_ID", asBuildConfigString(firebaseAppId))
         buildConfigField("String", "FIREBASE_API_KEY", asBuildConfigString(firebaseApiKey))
