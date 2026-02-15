@@ -55,7 +55,10 @@ Production Nginx applies a host-based SEO policy:
 - Canonical hints are sent as:
   - HTML canonical tag in `client/index.html` (`https://serenada.app/`)
   - HTTP `Link: <https://serenada.app<request-path>>; rel="canonical"` response header
+- Sensitive call routes are always blocked from indexing on all hosts:
+  - `/call/*` responses send `X-Robots-Tag: noindex, nofollow`
 - `robots.txt` is host-aware:
+  - All hosts include `Disallow: /call/`
   - Canonical host includes `Sitemap: https://serenada.app/sitemap.xml`
   - Mirror hosts omit sitemap entries
 
@@ -142,6 +145,7 @@ If you need to support redirects from old domains (e.g. `connected.dowhile.fun`)
     {"roomId":"..."}
     ```
 4.  Check logs if issues arise: `docker compose logs -f`.
+    Access logs redact `/call/<id>` in both the request path and the referrer field.
 5.  Verify canonical/mirror SEO headers:
     ```bash
     # Canonical domain should be indexable
@@ -149,4 +153,10 @@ If you need to support redirects from old domains (e.g. `connected.dowhile.fun`)
 
     # Mirror domain should be noindex
     curl -sI https://your-mirror-domain.example | rg -i "x-robots-tag|link"
+
+    # Call routes must never be indexable
+    curl -sI https://serenada.app/call/test-room | rg -i "x-robots-tag"
+
+    # robots.txt must block call routes
+    curl -s https://serenada.app/robots.txt | rg -i "disallow: /call/"
     ```
