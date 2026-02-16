@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -89,6 +90,24 @@ func normalizePushTransport(input string) string {
 	default:
 		return ""
 	}
+}
+
+func writeRoomIDValidationError(w http.ResponseWriter, roomID string) bool {
+	if roomID == "" {
+		http.Error(w, "Missing roomId", http.StatusBadRequest)
+		return true
+	}
+
+	if err := validateRoomID(roomID); err != nil {
+		if errors.Is(err, ErrRoomIDSecretMissing) {
+			http.Error(w, "Room ID service unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		http.Error(w, "Invalid roomId", http.StatusBadRequest)
+		return true
+	}
+
+	return false
 }
 
 func getDataDir() string {
@@ -211,6 +230,10 @@ func (s *PushService) GetVAPIDPublicKey() string {
 }
 
 func (s *PushService) Subscribe(roomID string, sub PushSubscriptionRequest) error {
+	if err := validateRoomID(roomID); err != nil {
+		return err
+	}
+
 	transport := normalizePushTransport(sub.Transport)
 	if transport == "" {
 		return fmt.Errorf("unsupported push transport")
@@ -248,6 +271,10 @@ func (s *PushService) Subscribe(roomID string, sub PushSubscriptionRequest) erro
 }
 
 func (s *PushService) Unsubscribe(roomID string, endpoint string) error {
+	if err := validateRoomID(roomID); err != nil {
+		return err
+	}
+
 	stmt, err := s.db.Prepare("DELETE FROM subscriptions WHERE room_id = ? AND endpoint = ?")
 	if err != nil {
 		return err
@@ -263,6 +290,11 @@ func (s *PushService) Unsubscribe(roomID string, endpoint string) error {
 }
 
 func (s *PushService) SendNotificationToRoom(roomID string, excludeEndpoint string, snapshotID string) {
+	if err := validateRoomID(roomID); err != nil {
+		log.Printf("[PUSH] Skipping notifications for invalid room %q: %v", roomID, err)
+		return
+	}
+
 	rows, err := s.db.Query("SELECT id, endpoint, auth, p256dh, locale, COALESCE(transport, 'webpush') FROM subscriptions WHERE room_id = ?", roomID)
 	if err != nil {
 		log.Printf("[PUSH] Failed to query subscriptions for room %s: %v", roomID, err)
@@ -535,9 +567,8 @@ func handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roomId := r.URL.Query().Get("roomId")
-	if roomId == "" {
-		http.Error(w, "Missing roomId", http.StatusBadRequest)
+	roomId := strings.TrimSpace(r.URL.Query().Get("roomId"))
+	if writeRoomIDValidationError(w, roomId) {
 		return
 	}
 
@@ -606,9 +637,8 @@ func handlePushRecipients(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	roomId := r.URL.Query().Get("roomId")
-	if roomId == "" {
-		http.Error(w, "Missing roomId", http.StatusBadRequest)
+	roomId := strings.TrimSpace(r.URL.Query().Get("roomId"))
+	if writeRoomIDValidationError(w, roomId) {
 		return
 	}
 
