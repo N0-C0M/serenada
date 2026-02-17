@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
@@ -164,6 +165,36 @@ fun SerenadaAppRoot(
             else -> RootScreen.Join
         }
 
+        fun closeSettings() {
+            hostInput = serverHost
+            settingsHostError = null
+            settingsSaveInProgress = false
+            showDiagnostics = false
+            showSettings = false
+        }
+
+        fun closeJoinWithCode() {
+            if (hasError) callManager.dismissError()
+            showJoinWithCode = false
+            roomInput = ""
+        }
+
+        val handlesBackNavigation = currentScreen == RootScreen.Diagnostics ||
+            currentScreen == RootScreen.Settings ||
+            currentScreen == RootScreen.JoinWithCode ||
+            currentScreen == RootScreen.Error
+
+        BackHandler(enabled = handlesBackNavigation) {
+            when (currentScreen) {
+                RootScreen.Diagnostics -> showDiagnostics = false
+                RootScreen.Settings -> closeSettings()
+                RootScreen.JoinWithCode -> closeJoinWithCode()
+                RootScreen.Error -> callManager.dismissError()
+                RootScreen.Join,
+                RootScreen.Call -> Unit
+            }
+        }
+
         AnimatedContent(
             targetState = currentScreen,
             transitionSpec = {
@@ -261,11 +292,7 @@ fun SerenadaAppRoot(
                             }
                         },
                         onCancel = {
-                            hostInput = serverHost
-                            settingsHostError = null
-                            settingsSaveInProgress = false
-                            showDiagnostics = false
-                            showSettings = false
+                            closeSettings()
                         }
                     )
                 }
@@ -292,9 +319,7 @@ fun SerenadaAppRoot(
                             }
                         },
                         onBack = {
-                            if (hasError) callManager.dismissError()
-                            showJoinWithCode = false
-                            roomInput = ""
+                            closeJoinWithCode()
                         }
                     )
                 }

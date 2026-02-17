@@ -19,6 +19,7 @@
     <application
         android:name=".SerenadaApp"
         android:allowBackup="false"
+        android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
