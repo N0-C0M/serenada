@@ -1,6 +1,8 @@
 package app.serenada.android.ui
 
+import android.app.Activity
 import android.content.Intent
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -565,7 +567,14 @@ private fun shareText(context: android.content.Context, text: String, chooserTit
     val intent = Intent(Intent.ACTION_SEND).apply {
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, text)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-    context.startActivity(Intent.createChooser(intent, chooserTitle))
+    val chooser = Intent.createChooser(intent, chooserTitle)
+    if (context !is Activity) {
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    runCatching {
+        context.startActivity(chooser)
+    }.onFailure { error ->
+        Log.w("SettingsScreen", "Failed to open share sheet", error)
+    }
 }

@@ -77,6 +77,7 @@ fun JoinScreen(
     onOpenSettings: () -> Unit,
     onStartCall: () -> Unit,
     onJoinRecentCall: (String) -> Unit,
+    onJoinSavedRoom: (SavedRoom) -> Unit,
     onRemoveRecentCall: (String) -> Unit,
     onSaveRoom: (String, String) -> Unit,
     onRemoveSavedRoom: (String) -> Unit
@@ -166,7 +167,7 @@ fun JoinScreen(
                             rooms = savedRooms,
                             roomStatuses = roomStatuses,
                             isBusy = isBusy,
-                            onJoinSavedRoom = onJoinRecentCall,
+                            onJoinSavedRoom = onJoinSavedRoom,
                             onRenameSavedRoom = { roomId ->
                                 saveDialogRoomId = roomId
                                 saveDialogName = savedRoomNameById[roomId].orEmpty()
@@ -210,7 +211,7 @@ fun JoinScreen(
                             rooms = savedRooms,
                             roomStatuses = roomStatuses,
                             isBusy = isBusy,
-                            onJoinSavedRoom = onJoinRecentCall,
+                            onJoinSavedRoom = onJoinSavedRoom,
                             onRenameSavedRoom = { roomId ->
                                 saveDialogRoomId = roomId
                                 saveDialogName = savedRoomNameById[roomId].orEmpty()
@@ -352,7 +353,7 @@ private fun SavedRoomsSection(
     rooms: List<SavedRoom>,
     roomStatuses: Map<String, Int>,
     isBusy: Boolean,
-    onJoinSavedRoom: (String) -> Unit,
+    onJoinSavedRoom: (SavedRoom) -> Unit,
     onRenameSavedRoom: (String) -> Unit,
     onRemoveSavedRoom: (String) -> Unit
 ) {
@@ -374,7 +375,7 @@ private fun SavedRoomsSection(
                     room = room,
                     count = roomStatuses[room.roomId] ?: 0,
                     enabled = !isBusy,
-                    onClick = { onJoinSavedRoom(room.roomId) },
+                    onClick = { onJoinSavedRoom(room) },
                     onRename = { onRenameSavedRoom(room.roomId) },
                     onRemove = { onRemoveSavedRoom(room.roomId) }
                 )

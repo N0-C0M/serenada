@@ -391,6 +391,9 @@ fun SerenadaAppRoot(
                             callManager.updateServerHost(hostInput)
                             runWithCallPermissions { callManager.joinRoom(roomId) }
                         },
+                        onJoinSavedRoom = { room ->
+                            runWithCallPermissions { callManager.joinSavedRoom(room) }
+                        },
                         onRemoveRecentCall = { roomId ->
                             callManager.removeRecentCall(roomId)
                         },

@@ -13,7 +13,7 @@ Native Android (Kotlin) client for Serenada 1:1 WebRTC calls. This app mirrors t
 - WebRTC audio path configured with `JavaAudioDeviceModule` (`VOICE_COMMUNICATION`, hardware AEC/NS, low-latency path)
 - Recent calls on home (max 3, deduped) with live room occupancy status and long-press remove
 - Saved rooms with custom names, quick join, rename/remove actions, and configurable position above/below recent calls
-- Settings flow to create shareable saved-room links; opening such a link in the app adds the room with the creator-defined name
+- Settings flow to create shareable saved-room links; opening such a link in the app adds the room with the creator-defined name and uses per-room host overrides for non-default hosts
 - Deep links for `https://serenada.app/call/*`
 - Foreground service to keep active calls running in the background
 - Settings screen to change server host, with host validation on save
@@ -171,6 +171,10 @@ The app handles:
 - `https://serenada.app/call/*`
 - `https://serenada.app/saved/*` (adds a named saved room instead of joining immediately)
 
+Deep-link `host` query behavior:
+- Trusted hosts (`serenada.app`, `serenada-app.ru`) are allowed to update the global server host setting.
+- Other hosts are treated as one-off: calls use them only for that action, and saved-room links store them as per-room host overrides without mutating global settings.
+
 For App Links verification, the web server must serve:
 ```
 client/public/.well-known/assetlinks.json
@@ -213,7 +217,7 @@ On Save, the app validates `https://<host>/api/room-id` and only persists hosts 
 `Call defaults` also include `HD Video (experimental)`; when disabled (default), camera capture uses legacy `640x480`, and when enabled the app applies higher per-mode camera/composite targets.
 `Saved rooms` settings include:
 - A switch to show saved rooms above or below recent calls on the home screen
-- Room-link generation for named rooms (creates a room ID and shareable link that adds this room on recipient devices)
+- Room-link generation for named rooms (creates a room ID and shareable link that adds this room on recipient devices and preserves per-room host overrides for non-default hosts)
 `Device Check` in Settings opens a native diagnostics screen with:
 - Runtime permission checks (`CAMERA`, `RECORD_AUDIO`, `POST_NOTIFICATIONS` on Android 13+)
 - Audio/video capability inspection (camera inventory, composite prerequisites, audio processing feature availability)

@@ -31,6 +31,7 @@ import org.json.JSONObject
 import org.webrtc.IceCandidate
 import org.webrtc.PeerConnection
 import org.webrtc.SessionDescription
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.Executors
 
@@ -92,6 +93,7 @@ class CallManager(context: Context) {
     val roomStatuses: State<Map<String, Int>> = _roomStatuses
 
     private var currentRoomId: String? = null
+    private var activeCallHostOverride: String? = null
     private var clientId: String? = null
     private var hostCid: String? = null
     private var callStartTimeMs: Long? = null
@@ -314,9 +316,9 @@ class CallManager(context: Context) {
         val changed = trimmed != _serverHost.value
         settingsStore.host = trimmed
         _serverHost.value = trimmed
-        if (changed && currentRoomId == null && watchedRoomIds.isNotEmpty()) {
+        if (changed && currentRoomId == null) {
             signalingClient.close()
-            watchRecentRoomsIfNeeded()
+            refreshWatchedRooms()
         }
     }
 
@@ -358,18 +360,26 @@ class CallManager(context: Context) {
         _areSavedRoomsShownFirst.value = enabled
     }
 
-    fun saveRoom(roomId: String, name: String) {
+    fun saveRoom(roomId: String, name: String, host: String? = null) {
         val cleanRoomId = roomId.trim()
         val cleanName = normalizeSavedRoomName(name) ?: return
+        val normalizedHost = normalizeHostValue(host)
+        val hostOverride = normalizedHost?.takeUnless { isTrustedDeepLinkHost(it) }
         if (!isValidRoomId(cleanRoomId)) return
         savedRoomStore.saveRoom(
             SavedRoom(
                 roomId = cleanRoomId,
                 name = cleanName,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                host = hostOverride
             )
         )
         refreshSavedRooms()
+    }
+
+    fun joinSavedRoom(room: SavedRoom) {
+        val roomHostOverride = normalizeHostValue(room.host)?.takeUnless { isTrustedDeepLinkHost(it) }
+        joinRoom(room.roomId, roomHostOverride)
     }
 
     fun removeSavedRoom(roomId: String) {
@@ -391,12 +401,14 @@ class CallManager(context: Context) {
         }
 
         val targetHost = hostInput.trim().ifBlank { serverHost.value }
+        val normalizedHost = normalizeHostValue(targetHost) ?: targetHost
+        val roomHostOverride = normalizedHost.takeUnless { isTrustedDeepLinkHost(it) }
         apiClient.createRoomId(targetHost) { result ->
             handler.post {
                 result
                     .onSuccess { roomId ->
-                        saveRoom(roomId, normalizedName)
-                        val link = buildSavedRoomInviteLink(targetHost, roomId, normalizedName)
+                        saveRoom(roomId, normalizedName, roomHostOverride)
+                        val link = buildSavedRoomInviteLink(normalizedHost, roomId, normalizedName)
                         onResult(Result.success(link))
                     }
                     .onFailure { onResult(Result.failure(it)) }
@@ -406,13 +418,12 @@ class CallManager(context: Context) {
 
     fun handleDeepLink(uri: Uri) {
         val deepLinkTarget = parseDeepLinkTarget(uri) ?: return
-        if (!deepLinkTarget.host.isNullOrBlank()) {
-            updateServerHost(deepLinkTarget.host)
-        }
+        val hostPolicy = resolveDeepLinkHostPolicy(deepLinkTarget.host)
+        hostPolicy.persistedHost?.let { updateServerHost(it) }
 
         if (deepLinkTarget.action == DeepLinkAction.SaveRoom) {
             val roomName = deepLinkTarget.savedRoomName ?: deepLinkTarget.roomId
-            saveRoom(deepLinkTarget.roomId, roomName)
+            saveRoom(deepLinkTarget.roomId, roomName, hostPolicy.oneOffHost)
             return
         }
 
@@ -426,7 +437,7 @@ class CallManager(context: Context) {
             Log.d("CallManager", "Ignoring duplicate deep link for active room $roomId")
             return
         }
-        joinRoom(roomId)
+        joinRoom(roomId, hostPolicy.oneOffHost)
     }
 
     fun joinFromInput(input: String) {
@@ -445,14 +456,13 @@ class CallManager(context: Context) {
         if (uri != null && uri.scheme != null && uri.host != null) {
             val deepLinkTarget = parseDeepLinkTarget(uri)
             if (deepLinkTarget != null) {
-                if (!deepLinkTarget.host.isNullOrBlank()) {
-                    updateServerHost(deepLinkTarget.host)
-                }
+                val hostPolicy = resolveDeepLinkHostPolicy(deepLinkTarget.host)
+                hostPolicy.persistedHost?.let { updateServerHost(it) }
                 if (deepLinkTarget.action == DeepLinkAction.SaveRoom) {
                     val roomName = deepLinkTarget.savedRoomName ?: deepLinkTarget.roomId
-                    saveRoom(deepLinkTarget.roomId, roomName)
+                    saveRoom(deepLinkTarget.roomId, roomName, hostPolicy.oneOffHost)
                 } else {
-                    joinRoom(deepLinkTarget.roomId)
+                    joinRoom(deepLinkTarget.roomId, hostPolicy.oneOffHost)
                 }
                 return
             }
@@ -471,7 +481,7 @@ class CallManager(context: Context) {
         return DeepLinkTarget(
             action = action,
             roomId = roomId,
-            host = normalizeHostQueryParam(uri.getQueryParameter("host")) ?: uri.host,
+            host = normalizeHostValue(uri.getQueryParameter("host")) ?: normalizeHostValue(uri.authority),
             savedRoomName = normalizeSavedRoomName(uri.getQueryParameter("name"))
         )
     }
@@ -481,7 +491,7 @@ class CallManager(context: Context) {
     }
 
     private fun buildSavedRoomInviteLink(host: String, roomId: String, roomName: String): String {
-        val normalizedHost = normalizeHostQueryParam(host) ?: host
+        val normalizedHost = normalizeHostValue(host) ?: host
         val appLinkHost = if (normalizedHost == SettingsStore.HOST_RU) {
             SettingsStore.HOST_RU
         } else {
@@ -498,15 +508,43 @@ class CallManager(context: Context) {
             .toString()
     }
 
-    private fun normalizeHostQueryParam(host: String?): String? {
-        val value = host?.trim().orEmpty()
-        if (value.isBlank()) return null
-        val withoutScheme = value
-            .removePrefix("https://")
-            .removePrefix("http://")
-            .removeSuffix("/")
-            .trim()
-        return withoutScheme.ifBlank { null }
+    private fun normalizeHostValue(hostInput: String?): String? {
+        val raw = hostInput?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        val withScheme = if (raw.startsWith("http://", ignoreCase = true) ||
+            raw.startsWith("https://", ignoreCase = true)
+        ) {
+            raw
+        } else {
+            "https://$raw"
+        }
+        val parsed = runCatching { Uri.parse(withScheme) }.getOrNull() ?: return null
+        if (!parsed.userInfo.isNullOrBlank()) return null
+        if (!parsed.query.isNullOrBlank()) return null
+        if (!parsed.fragment.isNullOrBlank()) return null
+        val path = parsed.path.orEmpty()
+        if (path.isNotBlank() && path != "/") return null
+
+        val host = parsed.host?.trim()?.lowercase(Locale.ROOT) ?: return null
+        if (host.isBlank()) return null
+        val port = parsed.port
+        if (port == -1) return host
+        if (port <= 0 || port > 65535) return null
+        return "$host:$port"
+    }
+
+    private fun resolveDeepLinkHostPolicy(host: String?): DeepLinkHostPolicy {
+        val normalized = normalizeHostValue(host) ?: return DeepLinkHostPolicy()
+        return if (isTrustedDeepLinkHost(normalized)) {
+            DeepLinkHostPolicy(persistedHost = normalized)
+        } else {
+            DeepLinkHostPolicy(oneOffHost = normalized)
+        }
+    }
+
+    private fun isTrustedDeepLinkHost(host: String): Boolean {
+        val canonical = host.lowercase(Locale.ROOT)
+        return canonical == SettingsStore.DEFAULT_HOST || canonical == SettingsStore.HOST_RU
     }
 
     private fun normalizeSavedRoomName(name: String?): String? {
@@ -546,7 +584,7 @@ class CallManager(context: Context) {
         }
     }
 
-    fun joinRoom(roomId: String) {
+    fun joinRoom(roomId: String, oneOffHost: String? = null) {
         if (roomId.isBlank()) {
             updateState(
                 _uiState.value.copy(
@@ -557,6 +595,7 @@ class CallManager(context: Context) {
             )
             return
         }
+        activeCallHostOverride = normalizeHostValue(oneOffHost)
         currentRoomId = roomId
         val joinAttemptId = ++joinAttemptSerial
         callStartTimeMs = System.currentTimeMillis()
@@ -753,7 +792,7 @@ class CallManager(context: Context) {
             return
         }
         pendingJoinRoom = roomToJoin
-        signalingClient.connect(serverHost.value)
+        signalingClient.connect(currentSignalingHost())
     }
 
     private fun sendJoin(roomId: String, snapshotId: String? = null) {
@@ -806,7 +845,7 @@ class CallManager(context: Context) {
 
     private fun prepareJoinSnapshotAndConnect(roomId: String, joinAttemptId: Long) {
         joinSnapshotFeature.prepareSnapshotId(
-            host = serverHost.value,
+            host = currentSignalingHost(),
             roomId = roomId,
             isVideoEnabled = { _uiState.value.localVideoEnabled },
             isJoinAttemptActive = { isJoinAttemptActive(roomId, joinAttemptId) }
@@ -873,7 +912,7 @@ class CallManager(context: Context) {
         clientId?.let { settingsStore.reconnectCid = it }
         val joinedRoomId = msg.rid ?: currentRoomId
         if (!joinedRoomId.isNullOrBlank()) {
-            pushSubscriptionManager.subscribeRoom(joinedRoomId, serverHost.value)
+            pushSubscriptionManager.subscribeRoom(joinedRoomId, currentSignalingHost())
         }
         val roomState = parseRoomState(msg.payload)
         if (roomState != null) {
@@ -1129,7 +1168,7 @@ class CallManager(context: Context) {
     }
 
     private fun fetchTurnCredentials(token: String) {
-        apiClient.fetchTurnCredentials(serverHost.value, token) { result ->
+        apiClient.fetchTurnCredentials(currentSignalingHost(), token) { result ->
             handler.post {
                 result
                     .onSuccess { creds ->
@@ -1275,6 +1314,7 @@ class CallManager(context: Context) {
         hostCid = null
         clientId = null
         callStartTimeMs = null
+        activeCallHostOverride = null
         pendingJoinRoom = null
         pendingJoinSnapshotId = null
         pendingMessages.clear()
@@ -1388,7 +1428,7 @@ class CallManager(context: Context) {
             }
             if (roomId != null && currentRoomId == roomId) {
                 pendingJoinRoom = roomId
-                signalingClient.connect(serverHost.value)
+                signalingClient.connect(currentSignalingHost())
                 return@postDelayed
             }
             if (roomId == null && currentRoomId == null && watchedRoomIds.isNotEmpty()) {
@@ -1409,9 +1449,24 @@ class CallManager(context: Context) {
         refreshWatchedRooms()
     }
 
+    private fun shouldWatchSavedRoom(room: SavedRoom): Boolean {
+        val roomHost = room.host ?: return true
+        return roomHost.equals(serverHost.value, ignoreCase = true)
+    }
+
+    private fun currentSignalingHost(): String {
+        return if (currentRoomId != null) {
+            activeCallHostOverride ?: serverHost.value
+        } else {
+            serverHost.value
+        }
+    }
+
     private fun refreshWatchedRooms() {
         val mergedRoomIds = LinkedHashSet<String>()
-        _savedRooms.value.forEach { mergedRoomIds.add(it.roomId) }
+        _savedRooms.value
+            .filter { shouldWatchSavedRoom(it) }
+            .forEach { mergedRoomIds.add(it.roomId) }
         _recentCalls.value.forEach { mergedRoomIds.add(it.roomId) }
         watchedRoomIds = mergedRoomIds.toList()
         val watched = watchedRoomIds.toSet()
@@ -1429,7 +1484,7 @@ class CallManager(context: Context) {
         if (signalingClient.isConnected()) {
             sendWatchRoomsIfNeeded()
         } else {
-            signalingClient.connect(serverHost.value)
+            signalingClient.connect(currentSignalingHost())
         }
     }
 
@@ -1460,6 +1515,11 @@ class CallManager(context: Context) {
         val roomId: String,
         val host: String?,
         val savedRoomName: String?
+    )
+
+    private data class DeepLinkHostPolicy(
+        val persistedHost: String? = null,
+        val oneOffHost: String? = null
     )
 
     private companion object {

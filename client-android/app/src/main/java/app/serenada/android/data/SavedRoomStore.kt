@@ -2,13 +2,15 @@ package app.serenada.android.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 
 data class SavedRoom(
     val roomId: String,
     val name: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val host: String? = null
 )
 
 class SavedRoomStore(context: Context) {
@@ -18,12 +20,17 @@ class SavedRoomStore(context: Context) {
     fun saveRoom(room: SavedRoom) {
         if (!isValidRoomId(room.roomId)) return
         val cleanName = normalizeName(room.name) ?: return
+        val cleanHost = normalizeHost(room.host)
 
         val rooms = getSavedRooms().toMutableList()
         rooms.removeAll { it.roomId == room.roomId }
         rooms.add(
             index = 0,
-            element = room.copy(name = cleanName, createdAt = room.createdAt.coerceAtLeast(1L))
+            element = room.copy(
+                name = cleanName,
+                createdAt = room.createdAt.coerceAtLeast(1L),
+                host = cleanHost
+            )
         )
         persist(rooms.take(MAX_SAVED_ROOMS))
     }
@@ -40,11 +47,13 @@ class SavedRoomStore(context: Context) {
 
             val name = normalizeName(item.optString("name").orEmpty()) ?: continue
             val createdAt = item.optLong("createdAt", 0L).coerceAtLeast(1L)
+            val host = normalizeHost(item.opt("host")?.toString())
             rooms.add(
                 SavedRoom(
                     roomId = roomId,
                     name = name,
-                    createdAt = createdAt
+                    createdAt = createdAt,
+                    host = host
                 )
             )
         }
@@ -72,6 +81,7 @@ class SavedRoomStore(context: Context) {
                     put("roomId", room.roomId)
                     put("name", room.name)
                     put("createdAt", room.createdAt)
+                    room.host?.let { put("host", it) }
                 }
             )
         }
@@ -89,6 +99,30 @@ class SavedRoomStore(context: Context) {
             val trimmed = name.trim()
             if (trimmed.isBlank()) return null
             return trimmed.take(MAX_ROOM_NAME_LENGTH)
+        }
+
+        private fun normalizeHost(hostInput: String?): String? {
+            val raw = hostInput?.trim().orEmpty()
+            if (raw.isBlank()) return null
+            val withScheme = if (raw.startsWith("http://", ignoreCase = true) ||
+                raw.startsWith("https://", ignoreCase = true)
+            ) {
+                raw
+            } else {
+                "https://$raw"
+            }
+            val parsed = runCatching { Uri.parse(withScheme) }.getOrNull() ?: return null
+            val host = parsed.host?.trim()?.lowercase() ?: return null
+            if (host.isBlank()) return null
+            if (!parsed.userInfo.isNullOrBlank()) return null
+            if (!parsed.query.isNullOrBlank()) return null
+            if (!parsed.fragment.isNullOrBlank()) return null
+            val path = parsed.path
+            if (!path.isNullOrBlank() && path != "/") return null
+            val port = parsed.port
+            if (port == -1) return host
+            if (port <= 0 || port > 65535) return null
+            return "$host:$port"
         }
 
         private fun isValidRoomId(roomId: String): Boolean = ROOM_ID_REGEX.matches(roomId)
