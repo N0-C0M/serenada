@@ -64,6 +64,12 @@ class SettingsStore(context: Context) {
             prefs.edit().putBoolean(KEY_HD_VIDEO_EXPERIMENTAL_ENABLED, value).apply()
         }
 
+    var areSavedRoomsShownFirst: Boolean
+        get() = prefs.getBoolean(KEY_SAVED_ROOMS_SHOWN_FIRST, false)
+        set(value) {
+            prefs.edit().putBoolean(KEY_SAVED_ROOMS_SHOWN_FIRST, value).apply()
+        }
+
 
     companion object {
         const val DEFAULT_HOST = "serenada.app"
@@ -84,6 +90,7 @@ class SettingsStore(context: Context) {
         private const val KEY_DEFAULT_CAMERA_ENABLED = "default_camera_enabled"
         private const val KEY_DEFAULT_MIC_ENABLED = "default_mic_enabled"
         private const val KEY_HD_VIDEO_EXPERIMENTAL_ENABLED = "hd_video_experimental_enabled"
+        private const val KEY_SAVED_ROOMS_SHOWN_FIRST = "saved_rooms_shown_first"
 
         fun normalizeLanguage(value: String?): String =
             when (value) {

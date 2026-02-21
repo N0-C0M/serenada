@@ -17,6 +17,8 @@ import androidx.compose.runtime.mutableStateOf
 import app.serenada.android.R
 import app.serenada.android.data.RecentCall
 import app.serenada.android.data.RecentCallStore
+import app.serenada.android.data.SavedRoom
+import app.serenada.android.data.SavedRoomStore
 import app.serenada.android.data.SettingsStore
 import app.serenada.android.i18n.AppLocaleManager
 import app.serenada.android.network.ApiClient
@@ -42,6 +44,7 @@ class CallManager(context: Context) {
     private val apiClient = ApiClient(okHttpClient)
     private val settingsStore = SettingsStore(appContext)
     private val recentCallStore = RecentCallStore(appContext)
+    private val savedRoomStore = SavedRoomStore(appContext)
     private val connectivityManager =
         appContext.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     private val powerManager = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -78,6 +81,12 @@ class CallManager(context: Context) {
 
     private val _recentCalls = mutableStateOf<List<RecentCall>>(emptyList())
     val recentCalls: State<List<RecentCall>> = _recentCalls
+
+    private val _savedRooms = mutableStateOf<List<SavedRoom>>(emptyList())
+    val savedRooms: State<List<SavedRoom>> = _savedRooms
+
+    private val _areSavedRoomsShownFirst = mutableStateOf(settingsStore.areSavedRoomsShownFirst)
+    val areSavedRoomsShownFirst: State<Boolean> = _areSavedRoomsShownFirst
 
     private val _roomStatuses = mutableStateOf<Map<String, Int>>(emptyMap())
     val roomStatuses: State<Map<String, Int>> = _roomStatuses
@@ -163,6 +172,7 @@ class CallManager(context: Context) {
     init {
         registerConnectivityListener()
         refreshRecentCalls()
+        refreshSavedRooms()
     }
 
     private fun buildWebRtcEngine(): WebRtcEngine {
@@ -343,26 +353,80 @@ class CallManager(context: Context) {
         webRtcEngine.setHdVideoExperimentalEnabled(enabled)
     }
 
+    fun updateSavedRoomsShownFirst(enabled: Boolean) {
+        settingsStore.areSavedRoomsShownFirst = enabled
+        _areSavedRoomsShownFirst.value = enabled
+    }
+
+    fun saveRoom(roomId: String, name: String) {
+        val cleanRoomId = roomId.trim()
+        val cleanName = normalizeSavedRoomName(name) ?: return
+        if (!isValidRoomId(cleanRoomId)) return
+        savedRoomStore.saveRoom(
+            SavedRoom(
+                roomId = cleanRoomId,
+                name = cleanName,
+                createdAt = System.currentTimeMillis()
+            )
+        )
+        refreshSavedRooms()
+    }
+
+    fun removeSavedRoom(roomId: String) {
+        savedRoomStore.removeRoom(roomId)
+        refreshSavedRooms()
+    }
+
+    fun createSavedRoomInviteLink(roomName: String, hostInput: String, onResult: (Result<String>) -> Unit) {
+        val normalizedName = normalizeSavedRoomName(roomName)
+        if (normalizedName == null) {
+            handler.post {
+                onResult(
+                    Result.failure(
+                        IllegalArgumentException(appContext.getString(R.string.error_invalid_saved_room_name))
+                    )
+                )
+            }
+            return
+        }
+
+        val targetHost = hostInput.trim().ifBlank { serverHost.value }
+        apiClient.createRoomId(targetHost) { result ->
+            handler.post {
+                result
+                    .onSuccess { roomId ->
+                        saveRoom(roomId, normalizedName)
+                        val link = buildSavedRoomInviteLink(targetHost, roomId, normalizedName)
+                        onResult(Result.success(link))
+                    }
+                    .onFailure { onResult(Result.failure(it)) }
+            }
+        }
+    }
+
     fun handleDeepLink(uri: Uri) {
-        val roomId = extractRoomId(uri) ?: return
+        val deepLinkTarget = parseDeepLinkTarget(uri) ?: return
+        if (!deepLinkTarget.host.isNullOrBlank()) {
+            updateServerHost(deepLinkTarget.host)
+        }
+
+        if (deepLinkTarget.action == DeepLinkAction.SaveRoom) {
+            val roomName = deepLinkTarget.savedRoomName ?: deepLinkTarget.roomId
+            saveRoom(deepLinkTarget.roomId, roomName)
+            return
+        }
+
         val state = _uiState.value
+        val roomId = deepLinkTarget.roomId
         val isSameActiveRoom = (state.roomId == roomId || currentRoomId == roomId) &&
-                state.phase != CallPhase.Idle &&
-                state.phase != CallPhase.Error &&
-                state.phase != CallPhase.Ending
+            state.phase != CallPhase.Idle &&
+            state.phase != CallPhase.Error &&
+            state.phase != CallPhase.Ending
         if (isSameActiveRoom) {
             Log.d("CallManager", "Ignoring duplicate deep link for active room $roomId")
             return
         }
-        val linkHost = uri.host
-        if (!linkHost.isNullOrBlank()) {
-            updateServerHost(linkHost)
-        }
         joinRoom(roomId)
-    }
-
-    private fun extractRoomId(uri: Uri): String? {
-        return uri.pathSegments.lastOrNull()
     }
 
     fun joinFromInput(input: String) {
@@ -379,15 +443,79 @@ class CallManager(context: Context) {
         }
         val uri = runCatching { Uri.parse(trimmed) }.getOrNull()
         if (uri != null && uri.scheme != null && uri.host != null) {
-            val roomId = extractRoomId(uri)
-            if (roomId != null) {
-                updateServerHost(uri.host ?: serverHost.value)
-                joinRoom(roomId)
+            val deepLinkTarget = parseDeepLinkTarget(uri)
+            if (deepLinkTarget != null) {
+                if (!deepLinkTarget.host.isNullOrBlank()) {
+                    updateServerHost(deepLinkTarget.host)
+                }
+                if (deepLinkTarget.action == DeepLinkAction.SaveRoom) {
+                    val roomName = deepLinkTarget.savedRoomName ?: deepLinkTarget.roomId
+                    saveRoom(deepLinkTarget.roomId, roomName)
+                } else {
+                    joinRoom(deepLinkTarget.roomId)
+                }
                 return
             }
         }
         joinRoom(trimmed)
     }
+
+    private fun parseDeepLinkTarget(uri: Uri): DeepLinkTarget? {
+        val roomId = extractRoomId(uri) ?: return null
+        if (!isValidRoomId(roomId)) return null
+        val action = when (uri.pathSegments.firstOrNull()?.lowercase()) {
+            "saved" -> DeepLinkAction.SaveRoom
+            else -> DeepLinkAction.Join
+        }
+
+        return DeepLinkTarget(
+            action = action,
+            roomId = roomId,
+            host = normalizeHostQueryParam(uri.getQueryParameter("host")) ?: uri.host,
+            savedRoomName = normalizeSavedRoomName(uri.getQueryParameter("name"))
+        )
+    }
+
+    private fun extractRoomId(uri: Uri): String? {
+        return uri.pathSegments.lastOrNull()?.takeIf { it.isNotBlank() }
+    }
+
+    private fun buildSavedRoomInviteLink(host: String, roomId: String, roomName: String): String {
+        val normalizedHost = normalizeHostQueryParam(host) ?: host
+        val appLinkHost = if (normalizedHost == SettingsStore.HOST_RU) {
+            SettingsStore.HOST_RU
+        } else {
+            SettingsStore.DEFAULT_HOST
+        }
+        return Uri.Builder()
+            .scheme("https")
+            .authority(appLinkHost)
+            .appendPath("saved")
+            .appendPath(roomId)
+            .appendQueryParameter("host", normalizedHost)
+            .appendQueryParameter("name", roomName)
+            .build()
+            .toString()
+    }
+
+    private fun normalizeHostQueryParam(host: String?): String? {
+        val value = host?.trim().orEmpty()
+        if (value.isBlank()) return null
+        val withoutScheme = value
+            .removePrefix("https://")
+            .removePrefix("http://")
+            .removeSuffix("/")
+            .trim()
+        return withoutScheme.ifBlank { null }
+    }
+
+    private fun normalizeSavedRoomName(name: String?): String? {
+        val trimmed = name?.trim().orEmpty()
+        if (trimmed.isBlank()) return null
+        return trimmed.take(MAX_SAVED_ROOM_NAME_LENGTH)
+    }
+
+    private fun isValidRoomId(roomId: String): Boolean = ROOM_ID_REGEX.matches(roomId)
 
     fun startNewCall() {
         if (_uiState.value.phase != CallPhase.Idle) return
@@ -481,6 +609,7 @@ class CallManager(context: Context) {
         if (_uiState.value.phase == CallPhase.Error) {
             updateState(CallUiState())
             refreshRecentCalls()
+            refreshSavedRooms()
         }
     }
 
@@ -1271,7 +1400,20 @@ class CallManager(context: Context) {
     private fun refreshRecentCalls() {
         val calls = recentCallStore.getRecentCalls()
         _recentCalls.value = calls
-        watchedRoomIds = calls.map { it.roomId }
+        refreshWatchedRooms()
+    }
+
+    private fun refreshSavedRooms() {
+        val rooms = savedRoomStore.getSavedRooms()
+        _savedRooms.value = rooms
+        refreshWatchedRooms()
+    }
+
+    private fun refreshWatchedRooms() {
+        val mergedRoomIds = LinkedHashSet<String>()
+        _savedRooms.value.forEach { mergedRoomIds.add(it.roomId) }
+        _recentCalls.value.forEach { mergedRoomIds.add(it.roomId) }
+        watchedRoomIds = mergedRoomIds.toList()
         val watched = watchedRoomIds.toSet()
         _roomStatuses.value = _roomStatuses.value.filterKeys { watched.contains(it) }
         watchRecentRoomsIfNeeded()
@@ -1308,10 +1450,24 @@ class CallManager(context: Context) {
         refreshRecentCalls()
     }
 
+    private enum class DeepLinkAction {
+        Join,
+        SaveRoom
+    }
+
+    private data class DeepLinkTarget(
+        val action: DeepLinkAction,
+        val roomId: String,
+        val host: String?,
+        val savedRoomName: String?
+    )
+
     private companion object {
         const val WEBRTC_STATS_POLL_INTERVAL_MS = 2000L
         const val JOIN_PUSH_ENDPOINT_WAIT_MS = 250L
         const val CPU_WAKE_LOCK_TAG = "serenada:call-cpu"
         const val WIFI_PERF_LOCK_TAG = "serenada:call-wifi"
+        const val MAX_SAVED_ROOM_NAME_LENGTH = 120
+        val ROOM_ID_REGEX = Regex("^[A-Za-z0-9_-]{27}$")
     }
 }

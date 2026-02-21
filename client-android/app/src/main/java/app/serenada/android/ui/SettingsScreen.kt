@@ -1,5 +1,6 @@
 package app.serenada.android.ui
 
+import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -49,8 +50,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import app.serenada.android.R
 import app.serenada.android.data.SettingsStore
@@ -68,6 +72,7 @@ fun SettingsScreen(
     isDefaultCameraEnabled: Boolean,
     isDefaultMicrophoneEnabled: Boolean,
     isHdVideoExperimentalEnabled: Boolean,
+    areSavedRoomsShownFirst: Boolean,
     hostError: String?,
     isSaving: Boolean,
     onHostChange: (String) -> Unit,
@@ -75,6 +80,8 @@ fun SettingsScreen(
     onDefaultCameraChange: (Boolean) -> Unit,
     onDefaultMicrophoneChange: (Boolean) -> Unit,
     onHdVideoExperimentalChange: (Boolean) -> Unit,
+    onSavedRoomsShownFirstChange: (Boolean) -> Unit,
+    onCreateSavedRoomInviteLink: (String, (Result<String>) -> Unit) -> Unit,
     onOpenDiagnostics: () -> Unit,
     onSave: () -> Unit,
     onCancel: () -> Unit
@@ -96,10 +103,16 @@ fun SettingsScreen(
     val isCustomHost = !isDefaultHost && !isRuHost
 
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     var pingResult by remember { mutableStateOf<String?>(null) }
     var isPinging by remember { mutableStateOf(false) }
     var pingFailed by remember { mutableStateOf(false) }
+    var savedRoomNameInput by remember { mutableStateOf("") }
+    var createdSavedRoomLink by remember { mutableStateOf<String?>(null) }
+    var savedRoomLinkError by remember { mutableStateOf<String?>(null) }
+    var isCreatingSavedRoomLink by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -326,6 +339,113 @@ fun SettingsScreen(
                         onCheckedChange = onHdVideoExperimentalChange
                     )
                 }
+
+                SettingsSection(
+                    title = stringResource(R.string.settings_saved_rooms_title),
+                    subTitle = stringResource(R.string.settings_saved_rooms_help)
+                ) {
+                    SettingsSwitchRow(
+                        label = stringResource(R.string.settings_saved_rooms_show_first),
+                        subLabel = stringResource(R.string.settings_saved_rooms_show_first_info),
+                        checked = areSavedRoomsShownFirst,
+                        onCheckedChange = onSavedRoomsShownFirstChange
+                    )
+
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+
+                    OutlinedTextField(
+                        value = savedRoomNameInput,
+                        onValueChange = {
+                            savedRoomNameInput = it
+                            savedRoomLinkError = null
+                        },
+                        label = { Text(stringResource(R.string.saved_rooms_name_label)) },
+                        placeholder = { Text(stringResource(R.string.saved_rooms_name_placeholder)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        enabled = !isCreatingSavedRoomLink
+                    )
+
+                    OutlinedButton(
+                        onClick = {
+                            val name = savedRoomNameInput.trim()
+                            if (name.isBlank()) {
+                                savedRoomLinkError =
+                                    context.getString(R.string.error_invalid_saved_room_name)
+                                return@OutlinedButton
+                            }
+                            isCreatingSavedRoomLink = true
+                            savedRoomLinkError = null
+                            createdSavedRoomLink = null
+                            onCreateSavedRoomInviteLink(name) { result ->
+                                isCreatingSavedRoomLink = false
+                                result
+                                    .onSuccess { link ->
+                                        createdSavedRoomLink = link
+                                    }
+                                    .onFailure { error ->
+                                        savedRoomLinkError =
+                                            error.message?.ifBlank {
+                                                context.getString(R.string.error_failed_create_saved_room_link)
+                                            } ?: context.getString(R.string.error_failed_create_saved_room_link)
+                                    }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isCreatingSavedRoomLink
+                    ) {
+                        if (isCreatingSavedRoomLink) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            Text(stringResource(R.string.settings_saved_rooms_create_link))
+                        }
+                    }
+
+                    createdSavedRoomLink?.let { link ->
+                        Text(
+                            text = link,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    clipboardManager.setText(AnnotatedString(link))
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(stringResource(R.string.common_copy))
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    shareText(context, link, context.getString(R.string.settings_saved_rooms_share_link_chooser))
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(stringResource(R.string.common_share))
+                            }
+                        }
+                    }
+
+                    if (!savedRoomLinkError.isNullOrBlank()) {
+                        Text(
+                            text = savedRoomLinkError.orEmpty(),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
             }
         }
     }
@@ -439,4 +559,13 @@ private fun HostOptionRow(
             modifier = Modifier.padding(start = 8.dp, end = 8.dp)
         )
     }
+}
+
+private fun shareText(context: android.content.Context, text: String, chooserTitle: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    context.startActivity(Intent.createChooser(intent, chooserTitle))
 }
