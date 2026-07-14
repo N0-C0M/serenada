@@ -1,5 +1,6 @@
 using Serenada.Core.Models;
 using Serenada.Core.WebRtc;
+using Serenada.Core.WebRtc.MixedReality;
 
 namespace Serenada.Core.Call;
 
@@ -196,29 +197,9 @@ internal class WebRtcEngine : ISessionMediaEngine
 
     private IRtcPeerConnectionFactory CreateFactory()
     {
-        try
-        {
-            // Try the C++/CLI bridge first (production path)
-            var platformType = Type.GetType(
-                "Serenada.WebRtc.Native.RtcPlatformImpl, Serenada.WebRtc.Native");
-
-            if (platformType != null)
-            {
-                var platform = (IRtcPlatform)Activator.CreateInstance(platformType)!;
-                platform.Initialize();
-                return platform.CreateFactory();
-            }
-        }
-        catch (Exception ex)
-        {
-            Log(SerenadaLogLevel.Warning, "WebRtcEngine",
-                $"Native bridge not available: {ex.Message}. Using fallback.");
-        }
-
-        throw new PlatformNotSupportedException(
-            "WebRTC native library not found. Build SerenadaWebRtcNative with libwebrtc " +
-            "or install the WebRTC platform package. " +
-            "See client-windows/scripts/build-libwebrtc.ps1.");
+        var platform = new MrWebRtcPlatform();
+        platform.Initialize();
+        return platform.CreateFactory();
     }
 
     private string ComputeAggregate(
