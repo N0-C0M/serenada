@@ -9,6 +9,7 @@ Serenada is a privacy-focused 1:1 WebRTC video calling application. No accounts,
 - **Web**: `@agatx/serenada-core` (vanilla TS) + `@agatx/serenada-react-ui` (React components) + thin app shell
 - **Android**: `serenada-core` (Kotlin library) + `serenada-call-ui` (Compose) + sample app
 - **iOS**: `SerenadaCore` (SPM package) + `SerenadaCallUI` (SPM/SwiftUI) + host app
+- **Windows**: `Serenada.Core` (C# library) + `Serenada.CallUI` (WinUI 3) + host app
 - **Server**: Go signaling server
 
 ## Repository Rules (from AGENTS.md)
@@ -96,6 +97,24 @@ xcodebuild \
   -destination 'platform=iOS Simulator,name=iPhone 16' \
   -only-testing:SerenadaiOSUITests/DeepLinkRejoinFlowUITests \
   test
+```
+
+### Windows Client (`client-windows/`)
+```bash
+cd client-windows
+dotnet restore                     # Restore NuGet packages
+dotnet build SerenadaWindows.sln   # Build all projects (SDK + CallUI + App)
+dotnet test                        # Run tests (when test project is added)
+```
+
+The Windows SDK uses `Microsoft.MixedReality.WebRTC` NuGet for WebRTC (no native build required).
+For camera capture, the WinUI 3 host app requires Windows 10 1809+ and the
+`Microsoft.WindowsAppSDK` workload.
+
+**Cross-platform parity verification:**
+```bash
+node scripts/check-resilience-constants.mjs   # Verify all 4 platforms match
+node scripts/check-version-parity.mjs         # Verify SDK version parity
 ```
 
 ### Worktree Bootstrap & Validation

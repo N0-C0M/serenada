@@ -62,6 +62,16 @@ const sources = [
         file: 'client/packages/react-ui/package.json',
         regex: /"@agatx\/serenada-core"\s*:\s*"\^?([^"]+)"/,
     },
+    {
+        name: 'SerenadaCore (C# constant)',
+        file: 'client-windows/SerenadaCore/SerenadaCore.cs',
+        regex: /public\s+const\s+string\s+Version\s*=\s*"([^"]+)"/,
+    },
+    {
+        name: 'SerenadaCore (Directory.Build.props)',
+        file: 'client-windows/Directory.Build.props',
+        regex: /<Version>([^<]+)<\/Version>/,
+    },
 ];
 
 // ── Parse and compare ───────────────────────────────────────────────

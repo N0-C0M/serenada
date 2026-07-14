@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 /**
- * Verifies that WebRTC resilience constants are in sync across all three
- * Serenada clients (web, Android, iOS).
+ * Verifies that WebRTC resilience constants are in sync across all four
+ * Serenada clients (web, Android, iOS, Windows).
  *
  * Usage:  node scripts/check-resilience-constants.mjs
  * Exit 0 on match, 1 on mismatch.
@@ -26,6 +26,7 @@ const root = resolve(__dirname, '..');
 const TS_PATH = resolve(root, 'client/packages/core/src/constants.ts');
 const KT_PATH = resolve(root, 'client-android/serenada-core/src/main/java/app/serenada/core/call/WebRtcResilienceConstants.kt');
 const SWIFT_PATH = resolve(root, 'client-ios/SerenadaCore/Sources/Call/WebRtcResilienceConstants.swift');
+const CS_PATH = resolve(root, 'client-windows/SerenadaCore/WebRtcResilienceConstants.cs');
 
 // ── Parsers ──────────────────────────────────────────────────────────
 
@@ -79,6 +80,22 @@ function parseSwift(src) {
     return constants;
 }
 
+function parseCSharp(src) {
+    const constants = new Map();
+    // Match "public const int NAME = 123;" or "public const double NAME = 0.8;"
+    for (const m of src.matchAll(/public\s+const\s+(int|double)\s+(\w+)\s*=\s*([0-9.]+)/g)) {
+        const type = m[1];
+        const name = m[2];
+        const value = parseFloat(m[3].replace(/_/g, ''));
+        constants.set(name, value);
+    }
+    // Match array initializers: "public static readonly int[] NAME = [0, 1000, 2000];"
+    for (const m of src.matchAll(/public\s+static\s+readonly\s+(int|double)\[\]\s+(\w+)\s*=\s*\[([^\]]*)\]/g)) {
+        constants.set(m[2], parseNumericArray(m[3]));
+    }
+    return constants;
+}
+
 function parseNumericArray(raw) {
     return raw
         .split(',')
@@ -110,35 +127,44 @@ function fail(msg) {
 const tsSrc = readFileSync(TS_PATH, 'utf-8');
 const ktSrc = readFileSync(KT_PATH, 'utf-8');
 const swSrc = readFileSync(SWIFT_PATH, 'utf-8');
+const csSrc = readFileSync(CS_PATH, 'utf-8');
 
 const tsMap = parseTypeScript(tsSrc);
 const ktMap = parseKotlin(ktSrc);
 const swMap = parseSwift(swSrc);
+const csMap = parseCSharp(csSrc);
 
-const allNames = new Set([...tsMap.keys(), ...ktMap.keys(), ...swMap.keys()]);
+const allNames = new Set([...tsMap.keys(), ...ktMap.keys(), ...swMap.keys(), ...csMap.keys()]);
+const platforms = { ts: tsMap, kt: ktMap, sw: swMap, cs: csMap };
+const platformLabels = { ts: 'TypeScript', kt: 'Kotlin', sw: 'Swift', cs: 'C#' };
 let matchCount = 0;
 let skippedCount = 0;
 
 for (const name of [...allNames].sort()) {
-    const tsVal = tsMap.get(name);
-    const ktVal = ktMap.get(name);
-    const swVal = swMap.get(name);
+    const vals = Object.fromEntries(
+        Object.entries(platforms).map(([k, m]) => [k, m.get(name)])
+    );
+    const present = Object.values(vals).filter(v => v !== undefined);
 
     // Only enforce parity for constants present in at least two platforms.
-    // Platform-specific constants (e.g. web-only LOCAL_VIDEO_*) are allowed.
-    const present = [tsVal, ktVal, swVal].filter(v => v !== undefined);
     if (present.length < 2) {
         skippedCount++;
         continue;
     }
 
-    if (tsVal !== undefined && ktVal !== undefined && !valuesEqual(tsVal, ktVal)) {
-        fail(`${name}: TypeScript=${formatValue(tsVal)} vs Kotlin=${formatValue(ktVal)}`);
-    } else if (tsVal !== undefined && swVal !== undefined && !valuesEqual(tsVal, swVal)) {
-        fail(`${name}: TypeScript=${formatValue(tsVal)} vs Swift=${formatValue(swVal)}`);
-    } else if (ktVal !== undefined && swVal !== undefined && !valuesEqual(ktVal, swVal)) {
-        fail(`${name}: Kotlin=${formatValue(ktVal)} vs Swift=${formatValue(swVal)}`);
-    } else {
+    // Compare all pairs — report first mismatch
+    const keys = Object.keys(vals).filter(k => vals[k] !== undefined);
+    let mismatch = false;
+    for (let i = 0; i < keys.length && !mismatch; i++) {
+        for (let j = i + 1; j < keys.length && !mismatch; j++) {
+            if (!valuesEqual(vals[keys[i]], vals[keys[j]])) {
+                fail(`${name}: ${platformLabels[keys[i]]}=${formatValue(vals[keys[i]])} vs ${platformLabels[keys[j]]}=${formatValue(vals[keys[j]])}`);
+                mismatch = true;
+            }
+        }
+    }
+
+    if (!mismatch) {
         matchCount++;
     }
 }
