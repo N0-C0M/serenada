@@ -1,0 +1,15 @@
+# Build output
+bin/
+obj/
+*.user
+*.suo
+*.cache
+
+# NuGet
+*.nupkg
+*.snupkg
+
+# IDE
+.vs/
+.idea/
+*.DotSettings.user

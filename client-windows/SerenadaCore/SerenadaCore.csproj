@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Serenada.Core</RootNamespace>
+    <AssemblyName>Serenada.Core</AssemblyName>
+    <Description>Headless WebRTC call engine SDK for Serenada on Windows. Manages signaling, peer connections, media capture, and call state.</Description>
+    <PackageId>Serenada.Core</PackageId>
+    <PackageTags>serenada;webrtc;video-calling;p2p</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="9.0.0" />
+  </ItemGroup>
+
+</Project>
