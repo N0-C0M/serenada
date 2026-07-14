@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Serenada.Core;
 
 namespace Serenada.CallUI;
@@ -11,26 +12,23 @@ namespace Serenada.CallUI;
 ///
 /// Mirrors <c>SerenadaCallFlow</c> on Android (Compose) and iOS (SwiftUI).
 /// </summary>
-public sealed class SerenadaCallFlow : ContentControl
+public sealed class SerenadaCallFlow : UserControl
 {
-    // ── Dependency properties ─────────────────────────────────
+    private CallViewModel? _vm;
+    private CallScreen? _screen;
 
-    /// <summary>Configuration for the call flow.</summary>
     public static readonly DependencyProperty ConfigProperty =
         DependencyProperty.Register(nameof(Config), typeof(SerenadaCallFlowConfig),
             typeof(SerenadaCallFlow), new PropertyMetadata(new SerenadaCallFlowConfig()));
 
-    /// <summary>The active call session. Set this to drive the UI.</summary>
     public static readonly DependencyProperty SessionProperty =
         DependencyProperty.Register(nameof(Session), typeof(SerenadaSession),
             typeof(SerenadaCallFlow), new PropertyMetadata(null, OnSessionChanged));
 
-    /// <summary>Called when the user wants to end the call and leave.</summary>
     public static readonly DependencyProperty OnEndCallProperty =
         DependencyProperty.Register(nameof(OnEndCall), typeof(Action),
             typeof(SerenadaCallFlow), new PropertyMetadata(null));
 
-    /// <summary>Called when the UI should be dismissed entirely.</summary>
     public static readonly DependencyProperty OnDismissProperty =
         DependencyProperty.Register(nameof(OnDismiss), typeof(Action),
             typeof(SerenadaCallFlow), new PropertyMetadata(null));
@@ -59,16 +57,14 @@ public sealed class SerenadaCallFlow : ContentControl
         set => SetValue(OnDismissProperty, value);
     }
 
-    // ── Construction ──────────────────────────────────────────
-
     public SerenadaCallFlow()
     {
-        DefaultStyleKey = typeof(SerenadaCallFlow);
+        Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x0F, 0x17, 0x2A));
+        Loaded += OnLoaded;
     }
 
-    protected override void OnApplyTemplate()
+    private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        base.OnApplyTemplate();
         UpdateContent();
     }
 
@@ -85,19 +81,23 @@ public sealed class SerenadaCallFlow : ContentControl
             Content = new TextBlock
             {
                 Text = "No active session.",
+                Foreground = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x94, 0xA3, 0xB8)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             };
             return;
         }
 
-        var viewModel = new CallViewModel(Session);
-        var screen = new CallScreen(viewModel)
+        _vm?.Dispose();
+        _vm = new CallViewModel(Session);
+
+        _screen = new CallScreen(_vm)
         {
             FlowConfig = Config,
             EndCallAction = OnEndCall,
             DismissAction = OnDismiss,
         };
-        Content = screen;
+
+        Content = _screen;
     }
 }
