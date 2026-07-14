@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "SerenadaApp (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "SerenadaApp (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
