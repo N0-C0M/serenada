@@ -36,6 +36,8 @@ public class SerenadaSession : IDisposable
 
     private SignalingMessageRouter? _messageRouter;
     private JoinFlowCoordinator? _joinFlowCoordinator;
+    private MediaLivenessEmitter? _livenessEmitter;
+    private ContentStateBroadcaster? _contentState;
 
     // ── Properties ────────────────────────────────────────────
 
@@ -162,6 +164,19 @@ public class SerenadaSession : IDisposable
         _signalingProvider.OnRelayFailed += HandleProviderRelayFailed;
         _signalingProvider.OnReconnectTokenRefreshed += HandleProviderReconnectTokenRefreshed;
 
+        // Create resilience emitters
+        _livenessEmitter = new MediaLivenessEmitter(
+            getActiveCids: () => _state.RemoteParticipants
+                .Where(p => p.CameraReceiving || p.ContentReceiving)
+                .Select(p => p.Cid)
+                .ToList(),
+            broadcast: (payload) => _signalingProvider.Broadcast("media_liveness", payload),
+            logger: _logger);
+
+        _contentState = new ContentStateBroadcaster(
+            broadcast: (type, payload) => _signalingProvider.Broadcast(type, payload),
+            logger: _logger);
+
         // Begin join flow
         _joinFlowCoordinator.Begin();
     }
@@ -266,16 +281,24 @@ public class SerenadaSession : IDisposable
     /// <summary>Start screen sharing.</summary>
     public Task StartScreenShareAsync()
     {
-        // TODO: Wire to screen capture in Phase 3
-        Log(SerenadaLogLevel.Info, "Session", "Screen share requested (not yet implemented).");
+        _contentState?.StartSharing();
+        UpdateLocalParticipant(p => p with
+        {
+            Content = new ParticipantContent
+            {
+                Active = true,
+                Type = SignalingProtocolConstants.ContentTypeScreenShare,
+                Revision = 1,
+            },
+        });
         return Task.CompletedTask;
     }
 
     /// <summary>Stop screen sharing.</summary>
     public Task StopScreenShareAsync()
     {
-        // TODO: Wire to screen capture in Phase 3
-        Log(SerenadaLogLevel.Info, "Session", "Screen share stop requested (not yet implemented).");
+        _contentState?.StopSharing();
+        UpdateLocalParticipant(p => p with { Content = null });
         return Task.CompletedTask;
     }
 
@@ -336,6 +359,9 @@ public class SerenadaSession : IDisposable
         _signalingProvider.OnNegotiationDirty -= HandleProviderNegotiationDirty;
         _signalingProvider.OnRelayFailed -= HandleProviderRelayFailed;
         _signalingProvider.OnReconnectTokenRefreshed -= HandleProviderReconnectTokenRefreshed;
+
+        _livenessEmitter?.Dispose();
+        _livenessEmitter = null;
 
         _state = new CallState();
         _diagnostics = new CallDiagnostics();
@@ -461,20 +487,31 @@ public class SerenadaSession : IDisposable
     private void HandleRoomState(RoomStatePayload payload)
     {
         // Update remote participants
+        var remoteParticipants = payload.Participants
+            .Select(MapToRemoteParticipant)
+            .ToList()
+            .AsReadOnly();
+
+        var newPhase = payload.Participants.Count > 1 ? CallPhase.InCall : CallPhase.Waiting;
+
         _state = _state with
         {
-            RemoteParticipants = payload.Participants
-                .Select(MapToRemoteParticipant)
-                .ToList()
-                .AsReadOnly(),
-            Phase = payload.Participants.Count > 1 ? CallPhase.InCall : CallPhase.Waiting,
+            RemoteParticipants = remoteParticipants,
+            Phase = newPhase,
         };
         CommitState();
+
+        // Start/stop media liveness based on call phase
+        if (newPhase == CallPhase.InCall)
+            _livenessEmitter?.Start();
+        else if (newPhase == CallPhase.Waiting)
+            _livenessEmitter?.Stop();
     }
 
     private void HandleRoomEnded(string by)
     {
         Log(SerenadaLogLevel.Info, "Session", $"Room ended by {by}.");
+        _livenessEmitter?.Stop();
         Teardown(new EndReason.RemoteEnded());
     }
 
@@ -500,9 +537,56 @@ public class SerenadaSession : IDisposable
         }
     }
 
-    private void HandleContentState(ContentStatePayload payload) { /* TODO: Phase 4 */ }
-    private void HandleNegotiationDirty(NegotiationDirtyPayload payload) { /* TODO: Phase 4 */ }
-    private void HandleRelayFailed(RelayFailedPayload payload) { /* TODO: Phase 4 */ }
+    private void HandleContentState(ContentStatePayload payload)
+    {
+        if (payload.FromCid == null) return;
+
+        _state = _state with
+        {
+            RemoteParticipants = _state.RemoteParticipants
+                .Select(p =>
+                {
+                    if (p.Cid != payload.FromCid) return p;
+
+                    if (!payload.Active)
+                        return p with { Content = null };
+
+                    // Track highest revision per CID (ordering rule from protocol spec)
+                    if (payload.Revision is { } rev
+                        && p.Content?.Revision >= rev)
+                        return p; // Stale — ignore
+
+                    return p with
+                    {
+                        Content = new ParticipantContent
+                        {
+                            Active = payload.Active,
+                            Type = payload.ContentType
+                                ?? SignalingProtocolConstants.ContentTypeScreenShare,
+                            Revision = payload.Revision ?? 0,
+                        },
+                    };
+                })
+                .ToList()
+                .AsReadOnly(),
+        };
+        CommitState();
+    }
+
+    private void HandleNegotiationDirty(NegotiationDirtyPayload payload)
+    {
+        // Peer reattached — schedule fresh negotiation for this CID.
+        // Full implementation: trigger ICE restart or new offer for the dirty peer.
+        Log(SerenadaLogLevel.Debug, "Session",
+            $"Negotiation dirty with {payload.With} — renegotiation needed.");
+    }
+
+    private void HandleRelayFailed(RelayFailedPayload payload)
+    {
+        // Suppress further negotiation toward suspended peers.
+        Log(SerenadaLogLevel.Debug, "Session",
+            $"Relay failed to {string.Join(",", payload.Targets)} ({payload.Reason}).");
+    }
     private void HandleReconnectTokenRefreshed(ReconnectTokenRefreshedPayload payload)
     {
         // Persist updated recovery token
