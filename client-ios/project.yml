@@ -23,7 +23,7 @@ packages:
   # app sources (JoinSnapshotFeature) import WebRTC directly.
   ZelloWebRTC:
     url: https://github.com/zelloptt/zello-ios-web-rtc
-    exactVersion: 0.0.1
+    exactVersion: 0.0.2
   # Single manifest at the repo root exposes SerenadaCore, SerenadaCallUI, and
   # SerenadaBroadcastExtensionSupport; external consumers use the same package
   # via this repo's Git URL.

@@ -31,7 +31,7 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/zelloptt/zello-ios-web-rtc", exact: "0.0.1")
+        .package(url: "https://github.com/zelloptt/zello-ios-web-rtc", exact: "0.0.2")
     ],
     targets: [
         .target(
