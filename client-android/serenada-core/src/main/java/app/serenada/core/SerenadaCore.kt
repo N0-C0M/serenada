@@ -226,7 +226,7 @@ class SerenadaCore(
     }
 
     companion object {
-        const val VERSION = "0.9.2"
+        const val VERSION = "0.9.3"
     }
 }
 
