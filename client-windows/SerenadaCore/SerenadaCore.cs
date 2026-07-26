@@ -64,6 +64,34 @@ public class SerenadaCore
     }
 
     /// <summary>
+    /// Rejoin a session recovered after an unexpected process termination.
+    /// Preserves the server-issued CID and reconnect credential.
+    /// </summary>
+    public SerenadaSession Rejoin(
+        RecoveryRecord record,
+        string? displayName = null,
+        string? peerId = null)
+    {
+        AssertMainThread();
+        if (record.ExpiresAtMs <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+        {
+            _recoveryStorage.Clear();
+            throw new InvalidOperationException("The recoverable session has expired.");
+        }
+
+        var roomUrl = _config.ServerHost is { } host
+            ? CoreApiClient.BuildRoomUrl(host, record.RoomId)
+            : null;
+        return JoinInternal(
+            roomId: record.RoomId,
+            roomUrl: roomUrl,
+            displayName: displayName,
+            peerId: peerId,
+            reconnectCid: record.Cid,
+            reconnectToken: record.ReconnectToken);
+    }
+
+    /// <summary>
     /// Join a call using a full URL (e.g. <c>"https://serenada.app/call/ABC123"</c>).
     /// </summary>
     /// <param name="url">Full call URL. The last path segment is the room ID.</param>
@@ -156,7 +184,7 @@ public class SerenadaCore
             reconnectCid: reconnectCid,
             reconnectToken: reconnectToken,
             @delegate: Delegate,
-            logger: Logger,
+            logger: Logger ?? _config.Logger,
             recoveryStorage: _recoveryStorage);
 
         session.Start();
@@ -172,7 +200,7 @@ public class SerenadaCore
         return new SerenadaServerProvider(
             serverHost: serverHost,
             transports: _config.Transports,
-            logger: _config.Logger);
+            logger: Logger ?? _config.Logger);
     }
 
     // ── URL parsing ───────────────────────────────────────────

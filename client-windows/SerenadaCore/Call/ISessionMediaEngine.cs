@@ -11,6 +11,9 @@ namespace Serenada.Core.Call;
 /// </summary>
 internal interface ISessionMediaEngine : IDisposable
 {
+    /// <summary>Raised when the local preview track is created or replaced.</summary>
+    event Action<IRtcVideoTrack?> LocalVideoTrackChanged;
+
     /// <summary>Start local camera and microphone capture.</summary>
     Task StartLocalMediaAsync(bool startVideo);
 
@@ -54,11 +57,27 @@ internal interface ISessionMediaEngine : IDisposable
     /// <summary>The local video source (for snapshot capture).</summary>
     IRtcVideoSource? LocalVideoSource { get; }
 
+    /// <summary>The local video track used for preview and outbound media.</summary>
+    IRtcVideoTrack? LocalVideoTrack { get; }
+
     /// <summary>Whether multiple cameras are available.</summary>
     bool HasMultipleCameras { get; }
 
+    /// <summary>Camera modes available on this device.</summary>
+    IReadOnlyList<CameraMode> AvailableCameraModes { get; }
+
     /// <summary>Whether screen sharing is possible.</summary>
     bool CanScreenShare { get; }
+
+    /// <summary>
+    /// Whether this build can negotiate a second, independent content-video
+    /// transceiver. This must describe the real implementation, not just the
+    /// requested configuration.
+    /// </summary>
+    bool SupportsIndependentContentVideo { get; }
+
+    /// <summary>The camera mode currently feeding the local video track.</summary>
+    CameraMode CurrentCameraMode { get; }
 
     /// <summary>Aggregate ICE connection state across all slots.</summary>
     string AggregateIceConnectionState { get; }
@@ -78,6 +97,9 @@ internal interface IPeerConnectionSlotCallbacks
     /// <summary>Called when a remote video track is added.</summary>
     void OnRemoteVideoTrackAdded(string cid, IRtcVideoTrack track);
 
+    /// <summary>Called when a remote video track is removed.</summary>
+    void OnRemoteVideoTrackRemoved(string cid, IRtcVideoTrack track);
+
     /// <summary>Called when a remote audio track is added.</summary>
     void OnRemoteAudioTrackAdded(string cid, IRtcAudioTrack track);
 
@@ -86,6 +108,9 @@ internal interface IPeerConnectionSlotCallbacks
 
     /// <summary>Called when the peer connection state changes.</summary>
     void OnConnectionChanged(string cid, string state);
+
+    /// <summary>Called when local track changes require renegotiation.</summary>
+    void OnRenegotiationNeeded(string cid);
 
     /// <summary>Called when outbound media stalls.</summary>
     void OnOutboundMediaStalled(string cid);
@@ -110,6 +135,9 @@ internal interface IPeerConnectionSlot : IDisposable
 
     /// <summary>Current peer connection state.</summary>
     string ConnectionState { get; }
+
+    /// <summary>Current WebRTC signaling state.</summary>
+    string SignalingState { get; }
 
     /// <summary>Whether this slot is ready for negotiation.</summary>
     bool IsReady { get; }
@@ -143,4 +171,13 @@ internal interface IPeerConnectionSlot : IDisposable
 
     /// <summary>The content (screen share) video track from this remote peer (if any).</summary>
     IRtcVideoTrack? RemoteContentTrack { get; }
+
+    /// <summary>Negotiation identifier attached to local ICE candidates.</summary>
+    string? CurrentNegotiationId { get; }
+
+    /// <summary>Set the active offer identifier before applying SDP.</summary>
+    void SetNegotiationId(string negotiationId);
+
+    /// <summary>Replace the local camera track without recreating the slot.</summary>
+    void SetLocalVideoTrack(IRtcVideoTrack? track);
 }

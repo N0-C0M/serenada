@@ -13,10 +13,12 @@ All client platforms use a **headless SDK + optional UI** pattern:
 - **Web**: `client/packages/core/` (vanilla TS SDK) + `client/packages/react-ui/` (React UI) + `client/src/` (thin app shell)
 - **Android**: `client-android/serenada-core/` (Kotlin SDK) + `client-android/serenada-call-ui/` (Compose UI) + `client-android/app/` (host app)
 - **iOS**: `client-ios/SerenadaCore/` (SPM package) + `client-ios/SerenadaCallUI/` (SPM/SwiftUI) + `client-ios/Sources/` (host app)
+- **Windows**: `client-windows/SerenadaCore/` (C# SDK) + `client-windows/SerenadaCallUI/` (WinUI UI) + `client-windows/SerenadaApp/` (host app)
 - **Server**: `server/` (Go signaling server)
 - **Samples**: `samples/ios/`, `samples/android/`, `samples/web/` (minimal integration examples)
 
 SDK packages must not depend on UI frameworks (no SwiftUI in SerenadaCore, no React in @agatx/serenada-core, no Compose in serenada-core).
+`client-windows/SerenadaCore/` must likewise remain independent of WinUI.
 
 ## Code
 - Follow existing style and patterns
@@ -51,6 +53,16 @@ SDK packages must not depend on UI frameworks (no SwiftUI in SerenadaCore, no Re
 - Constants: `client-ios/SerenadaCore/Sources/Call/WebRtcResilienceConstants.swift`
 - Host app integration: `client-ios/Sources/Core/Call/CallManager.swift`
 - Shared push key store: `client-ios/Shared/PushKeyStore.swift`
+
+### Windows SDK
+- Entry point: `client-windows/SerenadaCore/SerenadaCore.cs`
+- Session: `client-windows/SerenadaCore/SerenadaSession.cs`
+- WebRTC: `client-windows/SerenadaCore/Call/WebRtcEngine.cs`
+- Negotiation: `client-windows/SerenadaCore/Call/PeerNegotiationEngine.cs`
+- Signaling: `client-windows/SerenadaCore/Signaling/SignalingEngine.cs`
+- Constants: `client-windows/SerenadaCore/WebRtcResilienceConstants.cs`
+- WinUI call surface: `client-windows/SerenadaCallUI/CallScreen.xaml`
+- Host app: `client-windows/SerenadaApp/MainWindow.xaml.cs`
 
 ### Server
 - Entry point: `server/main.go`
@@ -102,6 +114,11 @@ xcodebuild -project SerenadaiOS.xcodeproj -scheme SerenadaiOS \
   -destination 'platform=iOS Simulator,name=iPhone 16' test
 ```
 - Use the following deep-link to join a live call: `https://serenada.app/call/YovflsGamCygX912gb26Jeaq8Es`
+
+### Testing the Windows client
+- Run `dotnet build SerenadaWindows.sln -c Debug -p:Platform=x64` in `client-windows`
+- Launch `SerenadaApp/bin/x64/Debug/net9.0-windows10.0.26100.0/win-x64/SerenadaApp.exe`
+- Run `.\publish.ps1` to validate the self-contained Release artifact
 
 ## Worktree Setup
 When working in a git worktree, run the bootstrap script to install all dependencies:

@@ -31,14 +31,22 @@ internal class CoreApiClient : IDisposable
 
     private static string HttpsBaseUrl(string serverHost)
     {
-        var scheme = IsLocalHost(serverHost) ? "http" : "https";
-        return $"{scheme}://{serverHost}";
+        var normalized = serverHost.Trim().TrimEnd('/');
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri) &&
+            uri.Scheme is "http" or "https")
+        {
+            return $"{uri.Scheme}://{uri.Authority}";
+        }
+
+        var scheme = IsLocalHost(normalized) ? "http" : "https";
+        return $"{scheme}://{normalized}";
     }
 
     internal static string WsUrl(string serverHost)
     {
-        var scheme = IsLocalHost(serverHost) ? "ws" : "wss";
-        return $"{scheme}://{serverHost}/ws";
+        var httpBase = new Uri(HttpsBaseUrl(serverHost));
+        var scheme = httpBase.Scheme == "http" ? "ws" : "wss";
+        return $"{scheme}://{httpBase.Authority}/ws";
     }
 
     internal static string SseUrl(string serverHost)
@@ -53,10 +61,16 @@ internal class CoreApiClient : IDisposable
 
     internal static bool IsLocalHost(string host)
     {
-        var normalized = host.Trim().ToLowerInvariant();
-        return normalized.StartsWith("localhost") ||
-               normalized.StartsWith("127.") ||
-               normalized.StartsWith("10.0.2.2");
+        var normalized = host.Trim();
+        if (Uri.TryCreate(normalized, UriKind.Absolute, out var uri))
+            normalized = uri.Host;
+        else
+            normalized = normalized.Split(':')[0];
+
+        return normalized.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+               normalized.StartsWith("127.", StringComparison.Ordinal) ||
+               normalized.Equals("::1", StringComparison.Ordinal) ||
+               normalized.Equals("10.0.2.2", StringComparison.Ordinal);
     }
 
     // ── Endpoints ─────────────────────────────────────────────
@@ -68,7 +82,7 @@ internal class CoreApiClient : IDisposable
     {
         var url = $"{HttpsBaseUrl(serverHost)}/api/room-id";
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<RoomIdResponse>(JsonOptions, ct);
         if (result?.RoomId is not { Length: > 0 })
@@ -85,7 +99,7 @@ internal class CoreApiClient : IDisposable
         {
             var url = $"{HttpsBaseUrl(serverHost)}/api/room-id";
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            var response = await _httpClient.SendAsync(request, ct);
+            using var response = await _httpClient.SendAsync(request, ct);
             return response.IsSuccessStatusCode;
         }
         catch
@@ -101,7 +115,7 @@ internal class CoreApiClient : IDisposable
         string serverHost, string token, CancellationToken ct = default)
     {
         var url = $"{HttpsBaseUrl(serverHost)}/api/turn-credentials?token={Uri.EscapeDataString(token)}";
-        var response = await _httpClient.GetAsync(url, ct);
+        using var response = await _httpClient.GetAsync(url, ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<TurnCredentialsResponse>(JsonOptions, ct);
     }
@@ -114,7 +128,7 @@ internal class CoreApiClient : IDisposable
     {
         var url = $"{HttpsBaseUrl(serverHost)}/api/diagnostic-token";
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<DiagnosticTokenResponse>(JsonOptions, ct);
     }

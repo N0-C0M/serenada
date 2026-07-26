@@ -1,43 +1,38 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Serenada.Core;
 using Serenada.CallUI;
+using Serenada.Core;
+using Serenada.Core.Models;
 
 namespace SerenadaApp;
 
 /// <summary>
-/// Main application window. Demonstrates Serenada SDK integration with
-/// URL-first and session-first join patterns — mirrors the Android
-/// and iOS sample apps (~80 lines of integration code).
+/// Native Windows host for the headless Serenada SDK and WinUI call surface.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
-    private SerenadaCore? _serenada;
+    private readonly SerenadaCore _serenada;
     private SerenadaSession? _currentSession;
 
     public MainWindow()
     {
         InitializeComponent();
-
         ExtendsContentIntoTitleBar = true;
+        Closed += (_, _) => EndActiveSession();
 
         _serenada = new SerenadaCore(new SerenadaConfig
         {
             ServerHost = "serenada.app",
         });
 
-        // Check for recoverable session (crash recovery)
         var recovery = _serenada.GetRecoverableSession();
         if (recovery != null)
         {
-            StatusLabel.Text = "You have an active call. Rejoining…";
-            JoinCall(recovery.RoomId);
+            StatusLabel.Text = "Rejoining your active call...";
+            JoinCall(recovery.RoomId, recovery);
         }
     }
 
-    // ── Home screen actions ──────────────────────────────────
-
-    private async void OnJoinClick(object sender, RoutedEventArgs e)
+    private void OnJoinClick(object sender, RoutedEventArgs e)
     {
         var url = RoomUrlInput.Text?.Trim();
         if (string.IsNullOrWhiteSpace(url))
@@ -51,83 +46,81 @@ public sealed partial class MainWindow : Window
 
     private async void OnCreateRoomClick(object sender, RoutedEventArgs e)
     {
-        if (_serenada == null) return;
-
         try
         {
-            StatusLabel.Text = "Creating room…";
+            StatusLabel.Text = "Creating room...";
             CreateRoomButton.IsEnabled = false;
+            JoinButton.IsEnabled = false;
 
             var room = await _serenada.CreateRoomAsync();
-
-            // Show the room URL (user can share it)
             RoomUrlInput.Text = room.RoomUrl;
-            StatusLabel.Text = $"Room created. Share the link, then join.";
-
-            // Join the room
             JoinCall(room.RoomUrl);
         }
         catch (Exception ex)
         {
-            StatusLabel.Text = $"Error: {ex.Message}";
+            StatusLabel.Text = $"Could not create the room: {ex.Message}";
         }
         finally
         {
             CreateRoomButton.IsEnabled = true;
+            JoinButton.IsEnabled = true;
         }
     }
 
-    // ── Call flow ────────────────────────────────────────────
-
-    private void JoinCall(string url)
+    private void JoinCall(string url, RecoveryRecord? recovery = null)
     {
-        if (_serenada == null) return;
-
-        // Clean up previous session
-        _currentSession?.Dispose();
-
-        // Create the session
-        _currentSession = _serenada.Join(url: url);
-
-        // Switch to call UI
-        HomePanel.Visibility = Visibility.Collapsed;
-        CallPanel.Visibility = Visibility.Visible;
-
-        // Render the pre-built call flow component
-        var callFlow = new SerenadaCallFlow
+        try
         {
-            Session = _currentSession,
-            Config = new SerenadaCallFlowConfig
-            {
-                Title = "Serenada",
-                ScreenSharingEnabled = true,
-                InviteControlsEnabled = false,
-                EndCallEnabled = true,
-            },
-            OnEndCall = () =>
-            {
-                // Return to home screen
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    CallPanel.Visibility = Visibility.Collapsed;
-                    CallPanel.Children.Clear();
-                    HomePanel.Visibility = Visibility.Visible;
-                    StatusLabel.Text = "Call ended.";
-                });
-            },
-            OnDismiss = () =>
-            {
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    CallPanel.Visibility = Visibility.Collapsed;
-                    CallPanel.Children.Clear();
-                    HomePanel.Visibility = Visibility.Visible;
-                    _currentSession?.Dispose();
-                    _currentSession = null;
-                });
-            },
-        };
+            EndActiveSession();
+            CallPanel.Children.Clear();
 
-        CallPanel.Children.Add(callFlow);
+            _currentSession = recovery == null
+                ? _serenada.Join(url: url)
+                : _serenada.Rejoin(recovery);
+
+            HomePanel.Visibility = Visibility.Collapsed;
+            CallPanel.Visibility = Visibility.Visible;
+
+            var callFlow = new SerenadaCallFlow
+            {
+                Config = new SerenadaCallFlowConfig
+                {
+                    Title = "Serenada",
+                    ScreenSharingEnabled = false,
+                    InviteControlsEnabled = false,
+                    EndCallEnabled = true,
+                },
+                OnEndCall = ReturnHomeAfterCall,
+                OnDismiss = ReturnHomeAfterCall,
+                Session = _currentSession,
+            };
+            CallPanel.Children.Add(callFlow);
+        }
+        catch (Exception ex)
+        {
+            EndActiveSession();
+            CallPanel.Children.Clear();
+            CallPanel.Visibility = Visibility.Collapsed;
+            HomePanel.Visibility = Visibility.Visible;
+            StatusLabel.Text = $"Could not join the call: {ex.Message}";
+        }
+    }
+
+    private void ReturnHomeAfterCall()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            CallPanel.Visibility = Visibility.Collapsed;
+            CallPanel.Children.Clear();
+            EndActiveSession();
+            HomePanel.Visibility = Visibility.Visible;
+            StatusLabel.Text = "Call ended.";
+        });
+    }
+
+    private void EndActiveSession()
+    {
+        _currentSession?.Dispose();
+        _currentSession = null;
     }
 }

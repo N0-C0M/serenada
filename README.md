@@ -11,7 +11,8 @@ A simple, privacy-focused video calling application built with WebRTC. No accoun
 - **Privacy-first** – No tracking, no analytics, end-to-end encrypted peer-to-peer video
 - **Resilient signaling** – WebSocket with SSE fallback when WS is blocked
 - **Adaptive multi-party rooms** – New-capable clients create group-capable rooms by default, with legacy-first rooms still capped at 2 participants
-- **Mobile-friendly** – Works on Android Chrome, iOS Safari, desktop browsers, and native Android/iOS clients
+- **Cross-platform clients** – Works in modern browsers and as native Android, iOS, and Windows applications
+- **Windows native client (WinUI 3)** – Native camera/microphone capture and rendering, adaptive rooms with up to four participants, WebSocket/SSE signaling, TURN refresh, and reconnect recovery
 - **Desktop screen sharing (web)** – In-call screen share control on desktop browsers that support `getDisplayMedia` (not shown on mobile browsers)
 - **Recent calls on home** – Web and Android home screens show your latest calls with live room occupancy (Android supports long-press remove)
 - **Android saved rooms** – Name and pin rooms on home, choose whether they appear above or below recent calls, and create links that add named rooms on recipient devices
@@ -96,6 +97,25 @@ The native iOS app lives in `client-ios/`.
 
 iOS universal links are enabled for `serenada.app` and `serenada-app.ru` via associated domains plus `/.well-known/apple-app-site-association`.
 Note: iOS Simulator can run signaling and call flow, but local camera preview reliability varies by host setup; use a physical iPhone to validate local camera capture.
+
+### Windows Client (C# + WinUI 3)
+
+The native Windows app lives in `client-windows/` and follows the same
+headless SDK + optional UI structure as the mobile clients.
+
+```powershell
+cd client-windows
+dotnet build SerenadaWindows.sln -c Debug -p:Platform=x64
+```
+
+For a self-contained build that does not require a separate .NET installation:
+
+```powershell
+.\publish.ps1
+```
+
+See [`client-windows/README.md`](client-windows/README.md) for the output path
+and current capability notes.
 
 ### Production Deployment
 
@@ -305,13 +325,14 @@ When the coordinator publishes an `audioSessionInterrupted` event (e.g., due to 
 
 ## Documentation
 
-- [SDK API Reference](https://agatx.github.io/serenada/) – Generated API docs for all platforms (Web, Android, iOS)
+- [SDK API Reference](https://agatx.github.io/serenada/) – Generated API docs for Web, Android, and iOS
 - [Deployment Guide](DEPLOY.md) – Self-hosting instructions
 - [Protocol Specification](docs/serenada_protocol_v1.md) – Signaling protocol (WebSocket + SSE)
 - [Push Notifications](docs/push-notifications.md) – Encrypted snapshot notifications
 - [Snapshot Capture](docs/snapshot-capture.md) – `SerenadaSession.captureSnapshot` API and call-UI shutter button
 - [Android Client README](client-android/README.md) – Kotlin native app setup and build notes
 - [iOS Client README](client-ios/README.md) – SwiftUI native app setup and build notes
+- [Windows Client README](client-windows/README.md) – WinUI native app setup and build notes
 - `server/loadtest/run-local.sh` – Local signaling load sweep runner
 - [`server/loadtest/LOAD_SIMULATION_SEQUENCE.md`](server/loadtest/LOAD_SIMULATION_SEQUENCE.md) – Detailed load-conduit HTTP/WS call sequence and timing
 

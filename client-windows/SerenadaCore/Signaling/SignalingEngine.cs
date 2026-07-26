@@ -21,6 +21,8 @@ internal class SignalingEngine : IDisposable
     private CancellationTokenSource? _lifecycleCts;
     private int _missedPongs;
     private bool _transportEverConnected;
+    private bool _isExplicitlyDisconnected;
+    private long _transportId;
 
     // Backoff state
     private int _reconnectAttempt;
@@ -54,6 +56,7 @@ internal class SignalingEngine : IDisposable
 
     public async Task ConnectAsync()
     {
+        _isExplicitlyDisconnected = false;
         _reconnectAttempt = 0;
         _transportIndex = 0;
         _transportEverConnected = false;
@@ -69,15 +72,18 @@ internal class SignalingEngine : IDisposable
 
     public void Disconnect()
     {
+        _isExplicitlyDisconnected = true;
         CancelTimers();
         _ = _currentTransport?.CloseAsync("client_disconnect");
     }
 
     public void Dispose()
     {
+        _isExplicitlyDisconnected = true;
         CancelTimers();
         _lifecycleCts?.Cancel();
         _lifecycleCts?.Dispose();
+        _ = _currentTransport?.CloseAsync("dispose");
         _currentTransport = null;
     }
 
@@ -85,7 +91,16 @@ internal class SignalingEngine : IDisposable
 
     private async Task TryConnectCurrentTransportAsync()
     {
-        CancelTimers();
+        _pingCts?.Cancel();
+        _pingCts?.Dispose();
+        _pingCts = null;
+
+        _lifecycleCts?.Cancel();
+        _lifecycleCts?.Dispose();
+        _lifecycleCts = new CancellationTokenSource();
+
+        var previousTransport = _currentTransport;
+        var transportId = ++_transportId;
 
         var transportKind = _transportIndex < _transports.Count
             ? _transports[_transportIndex]
@@ -93,20 +108,34 @@ internal class SignalingEngine : IDisposable
 
         Log(SerenadaLogLevel.Info, "Engine", $"Connecting via {transportKind} (attempt {_reconnectAttempt + 1})...");
 
-        _currentTransport = transportKind switch
+        ISignalingTransport transport = transportKind switch
         {
             SerenadaTransport.Ws => new WebSocketSignalingTransport(),
             SerenadaTransport.Sse => new SseSignalingTransport(),
             _ => new WebSocketSignalingTransport(),
         };
+        _currentTransport = transport;
 
-        _lifecycleCts = new CancellationTokenSource();
+        if (previousTransport != null)
+            _ = previousTransport.CloseAsync("transport_replaced");
 
-        await _currentTransport.ConnectAsync(
+        await transport.ConnectAsync(
             host: _serverHost,
-            onOpen: HandleTransportOpen,
-            onMessage: HandleMessage,
-            onClosed: HandleTransportClosed,
+            onOpen: kind =>
+            {
+                if (transportId == _transportId)
+                    HandleTransportOpen(kind);
+            },
+            onMessage: message =>
+            {
+                if (transportId == _transportId)
+                    HandleMessage(message);
+            },
+            onClosed: reason =>
+            {
+                if (transportId == _transportId)
+                    HandleTransportClosed(reason);
+            },
             ct: _lifecycleCts.Token);
     }
 
@@ -152,12 +181,21 @@ internal class SignalingEngine : IDisposable
 
         OnClosed?.Invoke(reason);
 
+        // A call was intentionally left or disposed.  Do not resurrect its
+        // signaling transport in the background: it can otherwise rejoin the
+        // old room after the user has already entered a different one.
+        if (_isExplicitlyDisconnected)
+            return;
+
         // Attempt reconnection
         _ = AttemptReconnectAsync(reason);
     }
 
     private async Task AttemptReconnectAsync(string reason)
     {
+        if (_isExplicitlyDisconnected || _reconnectCts != null)
+            return;
+
         // Determine if we should fall back to the next transport
         var shouldFallback = !_transportEverConnected
             || reason.Contains("unsupported")
@@ -169,9 +207,10 @@ internal class SignalingEngine : IDisposable
         var currentTransportMatches = currentKind == TransportKind.Ws && _transports[_transportIndex] == SerenadaTransport.Ws
             || currentKind == TransportKind.Sse && _transports[_transportIndex] == SerenadaTransport.Sse;
 
-        if (shouldFallback
+        var fallback = shouldFallback
             && _transportIndex + 1 < _transports.Count
-            && currentTransportMatches)
+            && currentTransportMatches;
+        if (fallback)
         {
             _transportIndex++;
             _reconnectAttempt = 0;
@@ -180,27 +219,37 @@ internal class SignalingEngine : IDisposable
         else
         {
             _reconnectAttempt++;
+            _transportIndex = 0;
         }
 
         // Compute backoff delay
+        var exponent = Math.Max(0, _reconnectAttempt - 1);
         var delayMs = (int)Math.Min(
-            WebRtcResilienceConstants.ReconnectBackoffBaseMs * Math.Pow(2, _reconnectAttempt - 1),
+            WebRtcResilienceConstants.ReconnectBackoffBaseMs * Math.Pow(2, exponent),
             WebRtcResilienceConstants.ReconnectBackoffCapMs);
 
         Log(SerenadaLogLevel.Debug, "Engine", $"Reconnecting in {delayMs}ms (attempt {_reconnectAttempt})...");
 
         try
         {
-            _reconnectCts = new CancellationTokenSource();
-            await Task.Delay(delayMs, _reconnectCts.Token);
-            // On reconnect, reset to first transport priority
-            _transportIndex = 0;
-            _wsConsecutiveFailures = 0;
+            var reconnectCts = new CancellationTokenSource();
+            _reconnectCts = reconnectCts;
+            await Task.Delay(delayMs, reconnectCts.Token);
+            if (_isExplicitlyDisconnected)
+                return;
+
+            _reconnectCts = null;
+            reconnectCts.Dispose();
             await TryConnectCurrentTransportAsync();
         }
         catch (OperationCanceledException)
         {
             // Reconnect was cancelled
+        }
+        finally
+        {
+            _reconnectCts?.Dispose();
+            _reconnectCts = null;
         }
     }
 
@@ -236,6 +285,7 @@ internal class SignalingEngine : IDisposable
             catch (Exception ex)
             {
                 Log(SerenadaLogLevel.Warning, "Engine", $"Ping error: {ex.Message}");
+                await _currentTransport!.CloseAsync("ping_error");
                 break;
             }
         }

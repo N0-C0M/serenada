@@ -9,8 +9,32 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.MixedReality.WebRTC" Version="2.0.2" />
+    <PackageReference Include="Microsoft.MixedReality.WebRTC"
+                      Version="$(MixedRealityWebRtcVersion)"
+                      GeneratePathProperty="true" />
     <PackageReference Include="System.Text.Json" Version="9.0.0" />
+  </ItemGroup>
+
+  <!--
+    The package publishes its desktop native library under legacy win10-* RIDs,
+    which modern win-* publish targets do not select automatically. Copy the
+    matching binary explicitly so the app does not fail only when the first
+    peer connection is created.
+  -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' Or '$(Platform)' == 'x64'">
+    <None Include="$(PkgMicrosoft_MixedReality_WebRTC)\runtimes\win10-x64\native\mrwebrtc.dll"
+          Link="mrwebrtc.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x86' Or '$(Platform)' == 'x86'">
+    <None Include="$(PkgMicrosoft_MixedReality_WebRTC)\runtimes\win10-x86\native\mrwebrtc.dll"
+          Link="mrwebrtc.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          Visible="false" />
   </ItemGroup>
 
 </Project>

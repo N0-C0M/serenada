@@ -19,7 +19,9 @@ public sealed class SerenadaCallFlow : UserControl
 
     public static readonly DependencyProperty ConfigProperty =
         DependencyProperty.Register(nameof(Config), typeof(SerenadaCallFlowConfig),
-            typeof(SerenadaCallFlow), new PropertyMetadata(new SerenadaCallFlowConfig()));
+            typeof(SerenadaCallFlow), new PropertyMetadata(
+                new SerenadaCallFlowConfig(),
+                OnConfigChanged));
 
     public static readonly DependencyProperty SessionProperty =
         DependencyProperty.Register(nameof(Session), typeof(SerenadaSession),
@@ -61,6 +63,7 @@ public sealed class SerenadaCallFlow : UserControl
     {
         Background = new SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x0F, 0x17, 0x2A));
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -74,10 +77,22 @@ public sealed class SerenadaCallFlow : UserControl
             flow.UpdateContent();
     }
 
+    private static void OnConfigChanged(
+        DependencyObject d,
+        DependencyPropertyChangedEventArgs e)
+    {
+        if (d is SerenadaCallFlow flow && flow.IsLoaded)
+            flow.UpdateContent();
+    }
+
     private void UpdateContent()
     {
         if (Session == null)
         {
+            _screen?.Dispose();
+            _screen = null;
+            _vm?.Dispose();
+            _vm = null;
             Content = new TextBlock
             {
                 Text = "No active session.",
@@ -88,16 +103,24 @@ public sealed class SerenadaCallFlow : UserControl
             return;
         }
 
+        _screen?.Dispose();
         _vm?.Dispose();
         _vm = new CallViewModel(Session);
 
-        _screen = new CallScreen(_vm)
-        {
-            FlowConfig = Config,
-            EndCallAction = OnEndCall,
-            DismissAction = OnDismiss,
-        };
+        _screen = new CallScreen(
+            _vm,
+            Config,
+            OnEndCall,
+            OnDismiss);
 
         Content = _screen;
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        _screen?.Dispose();
+        _screen = null;
+        _vm?.Dispose();
+        _vm = null;
     }
 }

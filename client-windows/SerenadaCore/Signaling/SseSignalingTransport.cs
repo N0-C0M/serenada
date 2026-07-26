@@ -15,6 +15,7 @@ internal class SseSignalingTransport : ISignalingTransport
     private CancellationTokenSource? _receiveCts;
     private string? _sessionId;
     private string? _host;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public TransportKind Kind => TransportKind.Sse;
 
@@ -66,38 +67,54 @@ internal class SseSignalingTransport : ISignalingTransport
 
     public async Task SendAsync(SignalingMessage message, CancellationToken ct = default)
     {
-        if (_httpClient == null || _host == null)
+        var httpClient = _httpClient;
+        var host = _host;
+        if (httpClient == null || host == null)
             return;
 
         // Add session ID to outbound messages
         message = message with { Sid = message.Sid ?? _sessionId };
 
         var json = message.ToJson();
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        var sessionExpired = false;
 
+        await _sendLock.WaitAsync(ct);
         try
         {
-            var postUrl = $"{Networking.CoreApiClient.SseUrl(_host)}?sid={_sessionId}";
-            var response = await _httpClient.PostAsync(postUrl, content, ct);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var postUrl = $"{Networking.CoreApiClient.SseUrl(host)}?sid={_sessionId}";
+            using var response = await httpClient.PostAsync(postUrl, content, ct);
 
             // 410 Gone means the SSE session expired — signal transport closure
             if (response.StatusCode == System.Net.HttpStatusCode.Gone)
-            {
-                await CloseAsync("session_expired");
-            }
+                sessionExpired = true;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[SSE] Send error: {ex.Message}");
         }
+        finally
+        {
+            _sendLock.Release();
+        }
+
+        if (sessionExpired)
+            await CloseAsync("session_expired");
     }
 
     public async Task CloseAsync(string reason = "client_close")
     {
         _receiveCts?.Cancel();
-        _httpClient?.Dispose();
-        _httpClient = null;
-        await Task.CompletedTask;
+        await _sendLock.WaitAsync();
+        try
+        {
+            _httpClient?.Dispose();
+            _httpClient = null;
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     // ── SSE receive loop ─────────────────────────────────────
@@ -110,6 +127,8 @@ internal class SseSignalingTransport : ISignalingTransport
     {
         try
         {
+            using (response)
+            {
             using var stream = await response.Content.ReadAsStreamAsync(ct);
             using var reader = new StreamReader(stream, Encoding.UTF8);
 
@@ -154,6 +173,7 @@ internal class SseSignalingTransport : ISignalingTransport
             }
 
             onClosed("cancelled");
+            }
         }
         catch (OperationCanceledException)
         {

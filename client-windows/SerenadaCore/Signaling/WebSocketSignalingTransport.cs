@@ -13,6 +13,7 @@ internal class WebSocketSignalingTransport : ISignalingTransport
     private ClientWebSocket? _ws;
     private CancellationTokenSource? _receiveCts;
     private readonly int _connectTimeoutMs;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
 
     public TransportKind Kind => TransportKind.Ws;
 
@@ -59,15 +60,19 @@ internal class WebSocketSignalingTransport : ISignalingTransport
 
     public async Task SendAsync(SignalingMessage message, CancellationToken ct = default)
     {
-        if (_ws is not { State: WebSocketState.Open })
-            return;
-
         var json = message.ToJson();
         var bytes = Encoding.UTF8.GetBytes(json);
 
+        var lockTaken = false;
         try
         {
-            await _ws.SendAsync(
+            await _sendLock.WaitAsync(ct);
+            lockTaken = true;
+            var socket = _ws;
+            if (socket is not { State: WebSocketState.Open })
+                return;
+
+            await socket.SendAsync(
                 new ArraySegment<byte>(bytes),
                 WebSocketMessageType.Text,
                 endOfMessage: true,
@@ -77,30 +82,43 @@ internal class WebSocketSignalingTransport : ISignalingTransport
         {
             System.Diagnostics.Debug.WriteLine($"[WS] Send error: {ex.Message}");
         }
+        finally
+        {
+            if (lockTaken)
+                _sendLock.Release();
+        }
     }
 
     public async Task CloseAsync(string reason = "client_close")
     {
         _receiveCts?.Cancel();
 
-        if (_ws is { State: WebSocketState.Open or WebSocketState.CloseReceived })
+        await _sendLock.WaitAsync();
+        try
         {
-            try
+            if (_ws is { State: WebSocketState.Open or WebSocketState.CloseReceived })
             {
-                using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
-                await _ws.CloseAsync(
-                    WebSocketCloseStatus.NormalClosure,
-                    reason,
-                    closeCts.Token);
+                try
+                {
+                    using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                    await _ws.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        reason,
+                        closeCts.Token);
+                }
+                catch
+                {
+                    // Best-effort close
+                }
             }
-            catch
-            {
-                // Best-effort close
-            }
-        }
 
-        _ws?.Dispose();
-        _ws = null;
+            _ws?.Dispose();
+            _ws = null;
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     // ── Receive loop ──────────────────────────────────────────

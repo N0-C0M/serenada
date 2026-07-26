@@ -6,7 +6,13 @@
     <LangVersion>13</LangVersion>
     <Version>0.9.1</Version>
     <Authors>AgatX</Authors>
+    <MixedRealityWebRtcVersion>2.0.2</MixedRealityWebRtcVersion>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- The public API is still being documented incrementally. Do not make
+         missing XML documentation prevent producing the Windows application. -->
+    <NoWarn>$(NoWarn);1573;1591</NoWarn>
+    <!-- Microsoft.MixedReality.WebRTC ships native assets under win10-* RIDs. -->
+    <UseRidGraph>true</UseRidGraph>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)'=='Release'">

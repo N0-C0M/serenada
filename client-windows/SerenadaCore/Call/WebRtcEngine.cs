@@ -18,6 +18,8 @@ internal class WebRtcEngine : ISessionMediaEngine
 
     private IRtcPeerConnectionFactory? _factory;
     private readonly List<IPeerConnectionSlot> _slots = [];
+    private RtcConfiguration _rtcConfiguration = new();
+    private bool _localMediaStarted;
 
     // Local media — audio via MR-WebRTC, video via LocalMediaManager
     private IRtcAudioSource? _localAudioSource;
@@ -25,7 +27,6 @@ internal class WebRtcEngine : ISessionMediaEngine
     private IRtcVideoTrack? _localVideoTrack;
 
     // Independent content video
-    private MrExternalVideoSourceAdapter? _screenShareAdapter;
     private IRtcVideoTrack? _localContentVideoTrack;
 
     private CameraMode _currentCameraMode = CameraMode.Selfie;
@@ -33,9 +34,20 @@ internal class WebRtcEngine : ISessionMediaEngine
     public IRtcAudioSource? LocalAudioSource => _localAudioSource;
     public IRtcVideoSource? LocalVideoSource =>
         _localMedia.CurrentVideoSource is { } src ? new MrDeviceVideoSource(src) : null;
-    public bool HasMultipleCameras => _localMedia.HasMultipleCameras;
+    public bool HasMultipleCameras =>
+        _config.VideoMediaEnabled && _localMedia.HasMultipleCameras;
+    public IReadOnlyList<CameraMode> AvailableCameraModes =>
+        !_config.VideoMediaEnabled
+            ? []
+            : _config.CameraModes is { } configured
+            ? configured.Where(_localMedia.AvailableModes.Contains).ToList().AsReadOnly()
+            : _localMedia.AvailableModes;
     public bool CanScreenShare => _localMedia.CanScreenShare;
+    public bool SupportsIndependentContentVideo => false;
+    public CameraMode CurrentCameraMode => _currentCameraMode;
+    public IRtcVideoTrack? LocalVideoTrack => _localVideoTrack;
     public bool HasIceServers { get; private set; }
+    public event Action<IRtcVideoTrack?>? LocalVideoTrackChanged;
 
     public string AggregateIceConnectionState => ComputeAggregate(s => s.IceConnectionState,
         ["failed", "disconnected", "checking", "new", "connected", "completed", "closed"]);
@@ -54,21 +66,43 @@ internal class WebRtcEngine : ISessionMediaEngine
 
     public async Task StartLocalMediaAsync(bool startVideo)
     {
+        if (_localMediaStarted) return;
         _factory ??= CreateFactory();
 
-        // Audio source + track
-        _localAudioSource = _factory.CreateAudioSource();
-        _localAudioTrack = _factory.CreateAudioTrack("local_audio", _localAudioSource);
+        try
+        {
+            _localAudioSource = _factory.CreateAudioSource();
+            _localAudioTrack = _factory.CreateAudioTrack("local_audio", _localAudioSource);
+            _localAudioTrack.Enabled = _config.DefaultAudioEnabled;
+        }
+        catch (Exception ex)
+        {
+            Log(SerenadaLogLevel.Warning, "WebRtcEngine",
+                $"Microphone initialization failed: {ex.Message}");
+        }
 
         if (startVideo && _config.VideoMediaEnabled)
         {
-            // Use the first available camera mode from config
-            var preferredMode = _config.CameraModes?.FirstOrDefault()
-                ?? _localMedia.AvailableModes.FirstOrDefault();
+            try
+            {
+                await _localMedia.InitializeAsync();
+                var enabledModes = _config.CameraModes is { } configuredModes
+                    ? configuredModes
+                        .Where(_localMedia.AvailableModes.Contains)
+                        .ToList()
+                    : _localMedia.AvailableModes.ToList();
 
-            await StartVideoTrackAsync(preferredMode);
+                if (enabledModes.Count > 0)
+                    await StartVideoTrackAsync(enabledModes[0]);
+            }
+            catch (Exception ex)
+            {
+                Log(SerenadaLogLevel.Warning, "WebRtcEngine",
+                    $"Camera initialization failed: {ex.Message}");
+            }
         }
 
+        _localMediaStarted = true;
         Log(SerenadaLogLevel.Info, "WebRtcEngine", "Local media started.");
     }
 
@@ -78,17 +112,25 @@ internal class WebRtcEngine : ISessionMediaEngine
             slot.Dispose();
         _slots.Clear();
 
+        DisposeTrack(_localVideoTrack);
+        DisposeTrack(_localAudioTrack);
+        if (_localAudioSource is IDisposable audioSource)
+            audioSource.Dispose();
+        DisposeTrack(_localContentVideoTrack);
+
         _localVideoTrack = null;
         _localAudioTrack = null;
         _localAudioSource = null;
         _localContentVideoTrack = null;
-        _screenShareAdapter = null;
+        LocalVideoTrackChanged?.Invoke(null);
 
         _localMedia.Dispose();
         _factory?.Dispose();
         _factory = null;
 
         HasIceServers = false;
+        _rtcConfiguration = new RtcConfiguration();
+        _localMediaStarted = false;
     }
 
     // ── Media Control ────────────────────────────────────────
@@ -109,7 +151,7 @@ internal class WebRtcEngine : ISessionMediaEngine
 
     public async Task FlipCameraAsync()
     {
-        var modes = _localMedia.AvailableModes;
+        var modes = AvailableCameraModes;
         if (modes.Count <= 1) return;
 
         var idx = IndexOfMode(modes, _currentCameraMode);
@@ -119,7 +161,7 @@ internal class WebRtcEngine : ISessionMediaEngine
 
     public async Task SetCameraModeAsync(CameraMode mode)
     {
-        if (!_localMedia.AvailableModes.Contains(mode))
+        if (!AvailableCameraModes.Contains(mode))
         {
             Log(SerenadaLogLevel.Warning, "WebRtcEngine",
                 $"Camera mode {mode} not available. Available: {string.Join(",", _localMedia.AvailableModes)}");
@@ -128,43 +170,47 @@ internal class WebRtcEngine : ISessionMediaEngine
 
         Log(SerenadaLogLevel.Info, "WebRtcEngine", $"Switching camera to {mode}.");
 
+        var wasEnabled = _localVideoTrack?.Enabled ?? _config.DefaultVideoEnabled;
         var newSource = await _localMedia.SwitchCameraAsync(mode);
         if (newSource == null) return;
 
-        _currentCameraMode = mode;
-
         // Create a new video track from the new source
         _factory ??= CreateFactory();
-        _localVideoTrack = _factory.CreateVideoTrack("local_video",
-            new MrDeviceVideoSource(newSource));
-
-        // Update all existing slots with the new track
-        // (in Unified Plan, we'd replace the track on the sender;
-        // simpler: recreate slots — handled by session on next negotiation)
-    }
-
-    public async Task StartScreenShareAsync()
-    {
-        if (!_config.EnableIndependentContentVideo)
+        var previousTrack = _localVideoTrack;
+        IRtcVideoTrack newTrack;
+        try
+        {
+            newTrack = _factory.CreateVideoTrack("local_video",
+                new MrDeviceVideoSource(newSource));
+            newTrack.Enabled = wasEnabled;
+        }
+        catch (Exception ex)
         {
             Log(SerenadaLogLevel.Warning, "WebRtcEngine",
-                "Screen share requires enableIndependentContentVideo=true.");
+                $"Could not create a track for camera mode {mode}: {ex.Message}");
             return;
         }
 
-        _screenShareAdapter = new MrExternalVideoSourceAdapter();
-        var track = _screenShareAdapter.CreateTrack("local_content");
+        _localVideoTrack = newTrack;
+        _currentCameraMode = _localMedia.CurrentMode;
+        foreach (var slot in _slots)
+            slot.SetLocalVideoTrack(_localVideoTrack);
 
-        _factory ??= CreateFactory();
-        _localContentVideoTrack = new MrLocalVideoTrack(track);
+        LocalVideoTrackChanged?.Invoke(_localVideoTrack);
+        DisposeTrack(previousTrack);
+    }
 
-        Log(SerenadaLogLevel.Info, "WebRtcEngine", "Screen share started.");
+    public Task StartScreenShareAsync()
+    {
+        Log(SerenadaLogLevel.Warning, "WebRtcEngine",
+            "Native screen capture is unavailable in this build.");
+        return Task.CompletedTask;
     }
 
     public Task StopScreenShareAsync()
     {
+        DisposeTrack(_localContentVideoTrack);
         _localContentVideoTrack = null;
-        _screenShareAdapter = null;
         Log(SerenadaLogLevel.Info, "WebRtcEngine", "Screen share stopped.");
         return Task.CompletedTask;
     }
@@ -175,7 +221,7 @@ internal class WebRtcEngine : ISessionMediaEngine
     {
         HasIceServers = servers.Count > 0;
 
-        var config = new RtcConfiguration
+        _rtcConfiguration = new RtcConfiguration
         {
             IceServers = servers.Select(s => new RtcIceServer
             {
@@ -186,7 +232,7 @@ internal class WebRtcEngine : ISessionMediaEngine
         };
 
         foreach (var slot in _slots)
-            slot.SetIceServers(config);
+            slot.SetIceServers(_rtcConfiguration);
     }
 
     // ── Slots ────────────────────────────────────────────────
@@ -200,11 +246,13 @@ internal class WebRtcEngine : ISessionMediaEngine
             factory: _factory,
             remoteCid: participant.Cid,
             supportsIndependentContentVideo: participant.SupportsIndependentContentVideo
-                && _config.EnableIndependentContentVideo,
+                && SupportsIndependentContentVideo,
             callbacks: callbacks,
             localAudioTrack: _localAudioTrack,
             localVideoTrack: _localVideoTrack,
             localContentVideoTrack: _localContentVideoTrack,
+            videoMediaEnabled: _config.VideoMediaEnabled,
+            rtcConfiguration: _rtcConfiguration,
             logger: _logger);
 
         _slots.Add(slot);
@@ -233,6 +281,8 @@ internal class WebRtcEngine : ISessionMediaEngine
         _factory ??= CreateFactory();
         _localVideoTrack = _factory.CreateVideoTrack("local_video",
             new MrDeviceVideoSource(source));
+        _localVideoTrack.Enabled = _config.DefaultVideoEnabled;
+        LocalVideoTrackChanged?.Invoke(_localVideoTrack);
     }
 
     private IRtcPeerConnectionFactory CreateFactory()
@@ -265,6 +315,12 @@ internal class WebRtcEngine : ISessionMediaEngine
     private void Log(SerenadaLogLevel level, string tag, string message)
     {
         _logger?.Log(level, tag, message);
+    }
+
+    private static void DisposeTrack(object? track)
+    {
+        if (track is IDisposable disposable)
+            disposable.Dispose();
     }
 }
 

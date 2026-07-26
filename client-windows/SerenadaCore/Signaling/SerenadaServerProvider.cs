@@ -25,6 +25,9 @@ internal class SerenadaServerProvider : SignalingProviderBase
     private string? _roomId;
     private string? _ourCid;
     private int _joinAttempt;
+    private JoinOptions? _lastJoinOptions;
+    private CancellationTokenSource? _reconnectTokenRefreshCts;
+    private CancellationTokenSource? _turnRefreshCts;
 
     public override int Version => SupportedVersion;
 
@@ -49,9 +52,7 @@ internal class SerenadaServerProvider : SignalingProviderBase
     public override void Connect()
     {
         if (_engine != null)
-        {
-            _engine.Dispose();
-        }
+            return;
 
         _engine = new SignalingEngine(
             serverHost: _serverHost,
@@ -67,12 +68,20 @@ internal class SerenadaServerProvider : SignalingProviderBase
 
     public override void Disconnect()
     {
+        CancelReconnectTokenRefresh();
+        CancelTurnRefresh();
         _engine?.Disconnect();
     }
 
     public override void JoinRoom(string roomId, JoinOptions options)
     {
+        if (_roomId != null && _roomId != roomId)
+        {
+            _ourCid = null;
+            _reconnectToken = null;
+        }
         _roomId = roomId;
+        _lastJoinOptions = options;
         _joinAttempt++;
 
         var payload = BuildJoinPayload(options);
@@ -88,12 +97,20 @@ internal class SerenadaServerProvider : SignalingProviderBase
 
     public override void LeaveRoom()
     {
+        if (_roomId == null)
+            return;
+
         var msg = SignalingMessage.Outbound(
             SignalingProtocolConstants.TypeLeave,
             rid: _roomId,
             cid: _ourCid);
         _engine?.Send(msg);
         _roomId = null;
+        _ourCid = null;
+        _reconnectToken = null;
+        _lastJoinOptions = null;
+        CancelReconnectTokenRefresh();
+        CancelTurnRefresh();
     }
 
     public override void EndRoom()
@@ -177,14 +194,18 @@ internal class SerenadaServerProvider : SignalingProviderBase
                 _turnToken = joined.TurnToken;
                 _turnTokenExpiresAt = joined.TurnTokenExpiresAt;
                 _reconnectToken = joined.ReconnectToken;
-                RaiseJoined(joined);
+                RaiseJoined(joined with { LocalCid = _ourCid });
+                if (joined.TurnTokenTtlMs is { } turnTtlMs)
+                    ScheduleTurnRefresh(turnTtlMs);
 
                 // Schedule reconnect token refresh
                 if (joined.ReconnectTokenTtlMs is { } ttl)
                 {
                     var leeway = WebRtcResilienceConstants.ReconnectTokenRefreshLeewayMs;
-                    if (ttl > leeway)
-                        _ = ScheduleReconnectTokenRefreshAsync(ttl - leeway);
+                    var delay = ttl > leeway
+                        ? ttl - leeway
+                        : Math.Max(30_000, ttl / 2);
+                    ScheduleReconnectTokenRefresh(delay);
                 }
                 break;
 
@@ -206,15 +227,24 @@ internal class SerenadaServerProvider : SignalingProviderBase
                 var error = SignalingPayloadParsers.ParseError(payload);
                 if (error != null)
                 {
-                    RaiseError(error);
-
                     // Auto-retry fresh join on invalid reconnect token
-                    if (error.Code == SignalingProtocolConstants.ErrorInvalidReconnectToken)
+                    if (error.Code == SignalingProtocolConstants.ErrorInvalidReconnectToken &&
+                        _roomId != null &&
+                        _lastJoinOptions != null)
                     {
                         Log(SerenadaLogLevel.Warning, "Provider", "Reconnect token invalid — retrying fresh join.");
-                        if (_roomId != null)
-                            JoinRoom(_roomId, new JoinOptions()); // fresh join
+                        _ourCid = null;
+                        _reconnectToken = null;
+                        var freshOptions = _lastJoinOptions with
+                        {
+                            ReconnectCid = null,
+                            ReconnectToken = null,
+                        };
+                        JoinRoom(_roomId, freshOptions);
+                        break;
                     }
+
+                    RaiseError(error);
                 }
                 break;
 
@@ -223,6 +253,9 @@ internal class SerenadaServerProvider : SignalingProviderBase
                 if (turn != null)
                 {
                     _turnToken = turn.TurnToken;
+                    _turnTokenExpiresAt = turn.TurnTokenExpiresAt;
+                    if (turn.TurnTokenTtlMs is { } refreshedTurnTtlMs)
+                        ScheduleTurnRefresh(refreshedTurnTtlMs);
                     // Fetch new ICE servers
                     _ = RefreshIceServersAsync();
                 }
@@ -234,6 +267,13 @@ internal class SerenadaServerProvider : SignalingProviderBase
                 {
                     _reconnectToken = rt.ReconnectToken;
                     RaiseReconnectTokenRefreshed(rt);
+                    var refreshedReconnectTtl = rt.ReconnectTokenTtlMs
+                        ?? WebRtcResilienceConstants.ReconnectTokenTtlFallbackMs;
+                    var leeway = WebRtcResilienceConstants.ReconnectTokenRefreshLeewayMs;
+                    var delay = refreshedReconnectTtl > leeway
+                        ? refreshedReconnectTtl - leeway
+                        : Math.Max(30_000, refreshedReconnectTtl / 2);
+                    ScheduleReconnectTokenRefresh(delay);
                 }
                 break;
 
@@ -274,6 +314,8 @@ internal class SerenadaServerProvider : SignalingProviderBase
 
     private object BuildJoinPayload(JoinOptions options)
     {
+        var reconnectCid = _ourCid ?? options.ReconnectCid;
+        var reconnectToken = _reconnectToken ?? options.ReconnectToken;
         return new Dictionary<string, object?>
         {
             ["device"] = options.Device,
@@ -291,7 +333,8 @@ internal class SerenadaServerProvider : SignalingProviderBase
             ["createMaxParticipants"] = options.CreateMaxParticipants,
             ["displayName"] = options.DisplayName,
             ["peerId"] = options.PeerId,
-            ["reconnectCid"] = options.ReconnectCid,
+            ["reconnectCid"] = reconnectCid,
+            ["reconnectToken"] = reconnectToken,
         };
     }
 
@@ -302,16 +345,33 @@ internal class SerenadaServerProvider : SignalingProviderBase
         // Future optimization: track previous set and emit diffs.
     }
 
-    private async Task ScheduleReconnectTokenRefreshAsync(int delayMs)
+    private void ScheduleReconnectTokenRefresh(int delayMs)
+    {
+        CancelReconnectTokenRefresh();
+        _reconnectTokenRefreshCts = new CancellationTokenSource();
+        _ = ScheduleReconnectTokenRefreshAsync(
+            delayMs,
+            _reconnectTokenRefreshCts.Token);
+    }
+
+    private async Task ScheduleReconnectTokenRefreshAsync(
+        int delayMs,
+        CancellationToken ct)
     {
         try
         {
-            await Task.Delay(delayMs);
+            await Task.Delay(delayMs, ct);
+            if (ct.IsCancellationRequested || _roomId == null)
+                return;
             var msg = SignalingMessage.Outbound(
                 SignalingProtocolConstants.TypeReconnectTokenRefresh,
                 rid: _roomId,
                 cid: _ourCid);
             _engine?.Send(msg);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when leaving or refreshing the schedule.
         }
         catch (Exception ex)
         {
@@ -333,8 +393,53 @@ internal class SerenadaServerProvider : SignalingProviderBase
         }
     }
 
+    private void ScheduleTurnRefresh(int ttlMs)
+    {
+        CancelTurnRefresh();
+        var delayMs = Math.Max(
+            30_000,
+            (int)(ttlMs * WebRtcResilienceConstants.TurnRefreshTriggerRatio));
+        _turnRefreshCts = new CancellationTokenSource();
+        _ = SendTurnRefreshAfterDelayAsync(delayMs, _turnRefreshCts.Token);
+    }
+
+    private async Task SendTurnRefreshAfterDelayAsync(
+        int delayMs,
+        CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(delayMs, ct);
+            if (ct.IsCancellationRequested || _roomId == null)
+                return;
+
+            _engine?.Send(SignalingMessage.Outbound(
+                SignalingProtocolConstants.TypeTurnRefresh,
+                rid: _roomId,
+                cid: _ourCid));
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when the room is left.
+        }
+    }
+
     private void Log(SerenadaLogLevel level, string tag, string message)
     {
         _logger?.Log(level, tag, message);
+    }
+
+    private void CancelReconnectTokenRefresh()
+    {
+        _reconnectTokenRefreshCts?.Cancel();
+        _reconnectTokenRefreshCts?.Dispose();
+        _reconnectTokenRefreshCts = null;
+    }
+
+    private void CancelTurnRefresh()
+    {
+        _turnRefreshCts?.Cancel();
+        _turnRefreshCts?.Dispose();
+        _turnRefreshCts = null;
     }
 }

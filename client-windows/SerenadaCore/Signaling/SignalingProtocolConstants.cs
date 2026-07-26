@@ -70,6 +70,9 @@ public static class SignalingProtocolConstants
     /// <summary><c>"turn-refreshed"</c> — new TURN token.</summary>
     public const string TypeTurnRefreshed = "turn-refreshed";
 
+    /// <summary><c>"turn-refresh"</c> — request a fresh TURN token.</summary>
+    public const string TypeTurnRefresh = "turn-refresh";
+
     /// <summary><c>"reconnect-token-refreshed"</c> — new reconnect token.</summary>
     public const string TypeReconnectTokenRefreshed = "reconnect-token-refreshed";
 

@@ -48,11 +48,18 @@ public sealed record ParticipantMediaPolicy
 /// <summary>Parsed <c>joined</c> message payload.</summary>
 public sealed record JoinedPayload
 {
+    /// <summary>
+    /// CID assigned to this client from the signaling envelope. The built-in
+    /// provider fills it because the server keeps it outside the payload.
+    /// </summary>
+    public string? LocalCid { get; init; }
+
     public string HostCid { get; init; } = string.Empty;
     public IReadOnlyList<SignalingParticipant> Participants { get; init; } = [];
     public int MaxParticipants { get; init; } = 2;
     public string? TurnToken { get; init; }
     public long? TurnTokenExpiresAt { get; init; }
+    public int? TurnTokenTtlMs { get; init; }
     public string? ReconnectToken { get; init; }
     public int? ReconnectTokenTtlMs { get; init; }
     public long? Epoch { get; init; }
@@ -98,6 +105,7 @@ public sealed record MediaStatePayload
 public sealed record TurnRefreshedPayload
 {
     public string TurnToken { get; init; } = string.Empty;
+    public long? TurnTokenExpiresAt { get; init; }
     public int? TurnTokenTtlMs { get; init; }
 }
 

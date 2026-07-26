@@ -94,8 +94,12 @@ public interface IRtcVideoFrame
 {
     int Width { get; }
     int Height { get; }
+    int Stride { get; }
     long TimestampUs { get; }
     bool IsBlack { get; }
+
+    /// <summary>Copy this ARGB32 frame into a managed destination buffer.</summary>
+    void CopyTo(byte[] destination);
 }
 
 /// <summary>Video frame sink — receives frames for rendering.</summary>
@@ -148,6 +152,8 @@ public interface IRtcRtpSender
     string? TrackId { get; }
     IRtcVideoTrack? VideoTrack { get; }
     IRtcAudioTrack? AudioTrack { get; }
+    void SetVideoTrack(IRtcVideoTrack? track);
+    void SetAudioTrack(IRtcAudioTrack? track);
     void SetParameters(RtcRtpParameters parameters);
 }
 
