@@ -1,6 +1,4 @@
 using Windows.Devices.Enumeration;
-using Windows.Media.Capture;
-using Windows.Media.MediaProperties;
 using Microsoft.MixedReality.WebRTC;
 using Serenada.Core.Models;
 using Serenada.Core.WebRtc;
@@ -15,8 +13,7 @@ namespace Serenada.Core.Call;
 internal class LocalMediaManager : IDisposable
 {
     private readonly ISerenadaLogger? _logger;
-    private MediaCapture? _mediaCapture;
-    private DeviceInformationCollection? _videoDevices;
+    private IReadOnlyList<VideoCaptureDevice> _videoDevices = [];
 
     // Current state
     private CameraMode _currentMode = CameraMode.Selfie;
@@ -27,8 +24,8 @@ internal class LocalMediaManager : IDisposable
     private bool _disposed;
 
     // Camera info
-    private DeviceInformation? _frontCamera;
-    private DeviceInformation? _backCamera;
+    private VideoCaptureDevice? _frontCamera;
+    private VideoCaptureDevice? _backCamera;
     private bool _initialized;
 
     public DeviceVideoTrackSource? CurrentVideoSource => _currentVideoSource;
@@ -54,14 +51,34 @@ internal class LocalMediaManager : IDisposable
 
         try
         {
-            _videoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+            _videoDevices = (await DeviceVideoTrackSource.GetCaptureDevicesAsync())
+                .ToList()
+                .AsReadOnly();
+            IReadOnlyList<DeviceInformation> systemDevices;
+            try
+            {
+                systemDevices = (await DeviceInformation.FindAllAsync(
+                    DeviceClass.VideoCapture))
+                    .ToList()
+                    .AsReadOnly();
+            }
+            catch
+            {
+                systemDevices = [];
+            }
 
-            var unpositionedCameras = new List<DeviceInformation>();
+            var unpositionedCameras = new List<VideoCaptureDevice>();
             foreach (var device in _videoDevices)
             {
-                if (device.EnclosureLocation?.Panel == Panel.Front)
+                var systemDevice = systemDevices.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Id, device.id,
+                        StringComparison.OrdinalIgnoreCase))
+                    ?? systemDevices.FirstOrDefault(candidate =>
+                        string.Equals(candidate.Name, device.name,
+                            StringComparison.OrdinalIgnoreCase));
+                if (systemDevice?.EnclosureLocation?.Panel == Panel.Front)
                     _frontCamera ??= device;
-                else if (device.EnclosureLocation?.Panel == Panel.Back)
+                else if (systemDevice?.EnclosureLocation?.Panel == Panel.Back)
                     _backCamera ??= device;
                 else
                     unpositionedCameras.Add(device);
@@ -69,21 +86,33 @@ internal class LocalMediaManager : IDisposable
 
             // External USB webcams generally have no enclosure panel metadata.
             // Treat the first as selfie and a second distinct device as world.
-            _frontCamera ??= unpositionedCameras.FirstOrDefault()
-                ?? _videoDevices.FirstOrDefault();
-            _backCamera ??= unpositionedCameras
-                .FirstOrDefault(device => device.Id != _frontCamera?.Id);
+            if (_frontCamera == null)
+            {
+                _frontCamera = unpositionedCameras.Count > 0
+                    ? unpositionedCameras[0]
+                    : _videoDevices.Count > 0
+                        ? _videoDevices[0]
+                        : null;
+            }
+            if (_backCamera == null && _frontCamera is { } frontCamera)
+            {
+                _backCamera = FirstOrNull(
+                    unpositionedCameras,
+                    device => device.id != frontCamera.id);
+            }
 
             // Determine available modes
             var modes = new List<CameraMode>();
             if (_frontCamera != null) modes.Add(CameraMode.Selfie);
-            if (_backCamera != null && _backCamera.Id != _frontCamera?.Id)
+            if (_backCamera is { } backCamera &&
+                _frontCamera is { } resolvedFrontCamera &&
+                backCamera.id != resolvedFrontCamera.id)
                 modes.Add(CameraMode.World);
 
             AvailableModes = modes.Count > 0 ? modes : [CameraMode.Selfie];
 
             Log(SerenadaLogLevel.Info, "Media",
-                $"Cameras found: front={_frontCamera?.Name}, back={_backCamera?.Name}, " +
+                $"Cameras found: front={_frontCamera?.name}, back={_backCamera?.name}, " +
                 $"modes={string.Join(",", AvailableModes)}");
 
             _initialized = true;
@@ -109,7 +138,7 @@ internal class LocalMediaManager : IDisposable
         var hadActiveSource = _currentVideoSource != null;
         var targetDevice = ResolveCamera(mode);
 
-        if (targetDevice == null)
+        if (targetDevice is not { } resolvedTargetDevice)
         {
             Log(SerenadaLogLevel.Warning, "Media", "No camera available for video capture.");
             return null;
@@ -120,23 +149,23 @@ internal class LocalMediaManager : IDisposable
 
         try
         {
-            _currentVideoSource = await CreateVideoSourceAsync(targetDevice);
+            _currentVideoSource = await CreateVideoSourceAsync(resolvedTargetDevice);
             _currentMode = mode;
             Log(SerenadaLogLevel.Info, "Media",
-                $"Video capture started: {targetDevice.Name} (mode={mode}).");
+                $"Video capture started: {resolvedTargetDevice.name} (mode={mode}).");
         }
         catch (Exception ex)
         {
             Log(SerenadaLogLevel.Error, "Media", $"Video capture failed: {ex.Message}");
-            if (!hadActiveSource || previousDevice == null)
+            if (!hadActiveSource || previousDevice is not { } resolvedPreviousDevice)
                 return null;
 
             try
             {
-                _currentVideoSource = await CreateVideoSourceAsync(previousDevice);
+                _currentVideoSource = await CreateVideoSourceAsync(resolvedPreviousDevice);
                 _currentMode = previousMode;
                 Log(SerenadaLogLevel.Warning, "Media",
-                    $"Restored previous camera: {previousDevice.Name}.");
+                    $"Restored previous camera: {resolvedPreviousDevice.name}.");
             }
             catch (Exception restoreError)
             {
@@ -217,8 +246,6 @@ internal class LocalMediaManager : IDisposable
 
         _currentVideoTrack?.Dispose();
         _currentVideoSource?.Dispose();
-        _mediaCapture?.Dispose();
-        _mediaCapture = null;
     }
 
     private void Log(SerenadaLogLevel level, string tag, string message)
@@ -226,28 +253,36 @@ internal class LocalMediaManager : IDisposable
         _logger?.Log(level, tag, message);
     }
 
-    private DeviceInformation? ResolveCamera(CameraMode mode)
+    private VideoCaptureDevice? ResolveCamera(CameraMode mode)
     {
         return mode switch
         {
             CameraMode.Selfie => _frontCamera,
             CameraMode.World => _backCamera ?? _frontCamera,
             CameraMode.Composite => null,
-            _ => _frontCamera ?? _videoDevices?.FirstOrDefault(),
+            _ => _frontCamera ?? _videoDevices.FirstOrDefault(),
         };
     }
 
     private static Task<DeviceVideoTrackSource> CreateVideoSourceAsync(
-        DeviceInformation device)
+        VideoCaptureDevice device)
     {
         return DeviceVideoTrackSource.CreateAsync(new LocalVideoDeviceInitConfig
         {
-            videoDevice = new VideoCaptureDevice
-            {
-                id = device.Id,
-                name = device.Name,
-            },
+            videoDevice = device,
         });
+    }
+
+    private static VideoCaptureDevice? FirstOrNull(
+        IEnumerable<VideoCaptureDevice> devices,
+        Func<VideoCaptureDevice, bool> predicate)
+    {
+        foreach (var device in devices)
+        {
+            if (predicate(device))
+                return device;
+        }
+        return null;
     }
 }
 

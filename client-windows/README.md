@@ -14,6 +14,12 @@ Supported in the current build:
 - WebSocket signaling with SSE fallback;
 - TURN credential and reconnect-token refresh;
 - automatic transport and per-peer media recovery.
+- non-blocking native media and peer-connection startup;
+- persistent display-name, microphone, and camera join preferences.
+
+The Settings screen also links directly to the Windows microphone and camera
+privacy pages. Diagnostic logs are available from Settings and are stored in
+`%LOCALAPPDATA%\Serenada\serenada.log`.
 
 Native Windows screen capture is not implemented yet, so the client does not
 advertise independent content video and the call UI hides the screen-share

@@ -81,14 +81,16 @@ public interface IRtcPeerConnection : IDisposable
 /// </summary>
 public interface IRtcPeerConnectionFactory : IDisposable
 {
-    /// <summary>Create a new peer connection.</summary>
-    IRtcPeerConnection CreatePeerConnection(RtcConfiguration config, IRtcPeerConnectionObserver observer);
+    /// <summary>Create and initialize a new peer connection without blocking the caller thread.</summary>
+    Task<IRtcPeerConnection> CreatePeerConnectionAsync(
+        RtcConfiguration config,
+        IRtcPeerConnectionObserver observer);
 
     /// <summary>Create a video source (for camera or screen capture).</summary>
-    IRtcVideoSource CreateVideoSource(bool isScreencast);
+    Task<IRtcVideoSource> CreateVideoSourceAsync(bool isScreencast);
 
-    /// <summary>Create an audio source.</summary>
-    IRtcAudioSource CreateAudioSource();
+    /// <summary>Create an audio source without blocking the caller thread.</summary>
+    Task<IRtcAudioSource> CreateAudioSourceAsync();
 
     /// <summary>Create a video track from a source.</summary>
     IRtcVideoTrack CreateVideoTrack(string id, IRtcVideoSource source);

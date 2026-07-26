@@ -12,14 +12,19 @@ namespace Serenada.Core.Call;
 /// </summary>
 internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObserver
 {
-    private readonly IRtcPeerConnection _pc;
-    private readonly IRtcPeerConnectionFactory _factory;
     private readonly IPeerConnectionSlotCallbacks _callbacks;
     private readonly ISerenadaLogger? _logger;
     private readonly bool _enableIndependentContent;
+    private readonly bool _videoMediaEnabled;
+    private readonly bool _isOfferOwner;
+    private readonly IRtcAudioTrack? _localAudioTrack;
+    private IRtcVideoTrack? _localVideoTrack;
+    private readonly IRtcVideoTrack? _localContentVideoTrack;
+    private readonly Task _initializationTask;
 
     private readonly List<RtcIceCandidate> _pendingIceCandidates = [];
 
+    private IRtcPeerConnection? _pc;
     private string? _currentNegotiationId;
     private bool _hasRemoteDescription;
     private bool _closed;
@@ -43,9 +48,18 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
     public bool SupportsIndependentContentVideo => _enableIndependentContent;
     public bool IsReady => !_closed;
 
-    public string IceConnectionState => _pc.IceConnectionState.ToString().ToLowerInvariant();
-    public string ConnectionState => _pc.ConnectionState.ToString().ToLowerInvariant();
-    public string SignalingState => _pc.SignalingState.ToString().ToLowerInvariant();
+    public string IceConnectionState =>
+        (_pc?.IceConnectionState ?? RtcIceConnectionState.New)
+        .ToString()
+        .ToLowerInvariant();
+    public string ConnectionState =>
+        (_pc?.ConnectionState ?? RtcPeerConnectionState.New)
+        .ToString()
+        .ToLowerInvariant();
+    public string SignalingState =>
+        (_pc?.SignalingState ?? RtcSignalingState.Stable)
+        .ToString()
+        .ToLowerInvariant();
 
     public bool IsPathDirect { get; private set; } = true;
 
@@ -62,78 +76,61 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         IRtcVideoTrack? localVideoTrack,
         IRtcVideoTrack? localContentVideoTrack,
         bool videoMediaEnabled,
+        bool isOfferOwner,
         RtcConfiguration rtcConfiguration,
         ISerenadaLogger? logger)
     {
-        _factory = factory;
         RemoteCid = remoteCid;
         _enableIndependentContent = supportsIndependentContentVideo;
         _callbacks = callbacks;
         _logger = logger;
-
-        _pc = _factory.CreatePeerConnection(
-            rtcConfiguration with { ContinualGatheringPolicy = true },
-            this);
-
-        var audioTransceiver = _pc.AddTransceiver(
-            RtcMediaType.Audio,
-            RtcTransceiverDirection.SendRecv);
-        _audioSender = audioTransceiver.Sender;
-        _audioSender.SetAudioTrack(localAudioTrack);
-
-        if (videoMediaEnabled)
-        {
-            _cameraTransceiver = _pc.AddTransceiver(RtcMediaType.Video,
-                RtcTransceiverDirection.SendRecv);
-            _cameraSender = _cameraTransceiver.Sender;
-            _cameraSender.SetVideoTrack(localVideoTrack);
-
-            if (_enableIndependentContent)
-            {
-                _contentTransceiver = _pc.AddTransceiver(RtcMediaType.Video,
-                    RtcTransceiverDirection.SendRecv);
-                _contentSender = _contentTransceiver.Sender;
-                _contentSender.SetVideoTrack(localContentVideoTrack);
-                _contentSender.SetParameters(new RtcRtpParameters
-                {
-                    MaxBitrateBps = 1_500_000,
-                    MaxFramerate = 5,
-                });
-            }
-        }
+        _videoMediaEnabled = videoMediaEnabled;
+        _isOfferOwner = isOfferOwner;
+        _localAudioTrack = localAudioTrack;
+        _localVideoTrack = localVideoTrack;
+        _localContentVideoTrack = localContentVideoTrack;
+        _initializationTask = InitializeAsync(
+            factory,
+            rtcConfiguration with { ContinualGatheringPolicy = true });
     }
 
     // ── Offer / Answer lifecycle ─────────────────────────────
 
     public async Task<RtcSessionDescription> CreateOfferAsync()
     {
+        var pc = await GetPeerConnectionAsync();
         _currentNegotiationId ??= GenerateNegotiationId();
-        var offer = await _pc.CreateOfferAsync();
-        await _pc.SetLocalDescriptionAsync(offer);
+        var offer = await pc.CreateOfferAsync();
+        await pc.SetLocalDescriptionAsync(offer);
         return offer;
     }
 
     public async Task<RtcSessionDescription> CreateAnswerAsync()
     {
-        var answer = await _pc.CreateAnswerAsync();
-        await _pc.SetLocalDescriptionAsync(answer);
+        var pc = await GetPeerConnectionAsync();
+        var answer = await pc.CreateAnswerAsync();
+        await pc.SetLocalDescriptionAsync(answer);
         return answer;
     }
 
     public async Task SetRemoteDescriptionAsync(RtcSessionDescription desc)
     {
-        await _pc.SetRemoteDescriptionAsync(desc);
+        var pc = await GetPeerConnectionAsync();
+        await pc.SetRemoteDescriptionAsync(desc);
+        if (desc.Type == RtcSdpType.Offer && !_isOfferOwner)
+            BindAnswererTransceivers(pc);
         _hasRemoteDescription = true;
 
         // Flush buffered ICE candidates
         foreach (var ice in _pendingIceCandidates)
-            await _pc.AddIceCandidateAsync(ice);
+            await pc.AddIceCandidateAsync(ice);
         _pendingIceCandidates.Clear();
     }
 
     public async Task SetLocalDescriptionAsync(RtcSessionDescription desc)
     {
-        await _pc.SetLocalDescriptionAsync(desc);
+        var pc = await GetPeerConnectionAsync();
+        await pc.SetLocalDescriptionAsync(desc);
     }
 
     public async Task AddIceCandidateAsync(RtcIceCandidate candidate)
@@ -146,7 +143,8 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         }
         else
         {
-            await _pc.AddIceCandidateAsync(candidate);
+            var pc = await GetPeerConnectionAsync();
+            await pc.AddIceCandidateAsync(candidate);
         }
     }
 
@@ -161,7 +159,7 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         }
         _remoteContentTrack = null;
         _remoteAudioTrack = null;
-        _pc.Close();
+        _pc?.Close();
     }
 
     public void RestartIce()
@@ -173,7 +171,7 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         }
 
         _lastIceRestartAt = now;
-        _pc.RestartIce();
+        _pc?.RestartIce();
 
         Log(SerenadaLogLevel.Debug, "Slot", $"ICE restart for {RemoteCid}.");
     }
@@ -192,6 +190,7 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
 
     public void SetLocalVideoTrack(IRtcVideoTrack? track)
     {
+        _localVideoTrack = track;
         _cameraSender?.SetVideoTrack(track);
     }
 
@@ -252,6 +251,7 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         {
             _remoteAudioTrack = audioTrack;
             _callbacks.OnRemoteAudioTrackAdded(RemoteCid, audioTrack);
+            Log(SerenadaLogLevel.Info, "Slot", $"Audio track from {RemoteCid}.");
         }
     }
 
@@ -279,7 +279,105 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
 
     internal void SetIceServers(RtcConfiguration config)
     {
-        _pc.SetConfiguration(config);
+        _pc?.SetConfiguration(config);
+    }
+
+    private async Task InitializeAsync(
+        IRtcPeerConnectionFactory factory,
+        RtcConfiguration rtcConfiguration)
+    {
+        var pc = await factory.CreatePeerConnectionAsync(rtcConfiguration, this);
+        if (_closed)
+        {
+            pc.Dispose();
+            return;
+        }
+
+        _pc = pc;
+        if (!_isOfferOwner)
+            return;
+
+        var audioTransceiver = pc.AddTransceiver(
+            RtcMediaType.Audio,
+            RtcTransceiverDirection.SendRecv);
+        _audioSender = audioTransceiver.Sender;
+        _audioSender.SetAudioTrack(_localAudioTrack);
+
+        if (!_videoMediaEnabled)
+            return;
+
+        _cameraTransceiver = pc.AddTransceiver(
+            RtcMediaType.Video,
+            RtcTransceiverDirection.SendRecv);
+        _cameraSender = _cameraTransceiver.Sender;
+        _cameraSender.SetVideoTrack(_localVideoTrack);
+
+        if (!_enableIndependentContent)
+            return;
+
+        _contentTransceiver = pc.AddTransceiver(
+            RtcMediaType.Video,
+            RtcTransceiverDirection.SendRecv);
+        _contentSender = _contentTransceiver.Sender;
+        _contentSender.SetVideoTrack(_localContentVideoTrack);
+        _contentSender.SetParameters(new RtcRtpParameters
+        {
+            MaxBitrateBps = 1_500_000,
+            MaxFramerate = 5,
+        });
+    }
+
+    private void BindAnswererTransceivers(IRtcPeerConnection pc)
+    {
+        var audioTransceiver = pc.Transceivers
+            .FirstOrDefault(transceiver =>
+                transceiver.MediaType == RtcMediaType.Audio);
+        if (audioTransceiver != null)
+        {
+            audioTransceiver.Direction = RtcTransceiverDirection.SendRecv;
+            _audioSender = audioTransceiver.Sender;
+            _audioSender.SetAudioTrack(_localAudioTrack);
+        }
+
+        var videoTransceivers = pc.Transceivers
+            .Where(transceiver =>
+                transceiver.MediaType == RtcMediaType.Video)
+            .ToList();
+        if (!_videoMediaEnabled)
+        {
+            foreach (var transceiver in videoTransceivers)
+                transceiver.Direction = RtcTransceiverDirection.Inactive;
+            return;
+        }
+
+        if (videoTransceivers.Count > 0)
+        {
+            _cameraTransceiver = videoTransceivers[0];
+            _cameraTransceiver.Direction = RtcTransceiverDirection.SendRecv;
+            _cameraSender = _cameraTransceiver.Sender;
+            _cameraSender.SetVideoTrack(_localVideoTrack);
+        }
+
+        if (_enableIndependentContent && videoTransceivers.Count > 1)
+        {
+            _contentTransceiver = videoTransceivers[1];
+            _contentTransceiver.Direction = RtcTransceiverDirection.SendRecv;
+            _contentSender = _contentTransceiver.Sender;
+            _contentSender.SetVideoTrack(_localContentVideoTrack);
+            _contentSender.SetParameters(new RtcRtpParameters
+            {
+                MaxBitrateBps = 1_500_000,
+                MaxFramerate = 5,
+            });
+        }
+    }
+
+    private async Task<IRtcPeerConnection> GetPeerConnectionAsync()
+    {
+        await _initializationTask;
+        if (_closed || _pc == null)
+            throw new ObjectDisposedException(nameof(PeerConnectionSlot));
+        return _pc;
     }
 
     private static string GenerateNegotiationId()

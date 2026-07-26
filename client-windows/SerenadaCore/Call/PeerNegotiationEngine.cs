@@ -276,7 +276,10 @@ internal sealed class PeerNegotiationEngine : IPeerConnectionSlotCallbacks, IDis
             ? new RemoteParticipant { Cid = remoteCid }
             : MapParticipant(signalingParticipant);
 
-        var slot = _mediaEngine.CreateSlot(participant, this);
+        var slot = _mediaEngine.CreateSlot(
+            participant,
+            this,
+            isOfferOwner: ShouldOffer(remoteCid));
         _slots[remoteCid] = slot;
         return slot;
     }

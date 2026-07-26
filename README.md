@@ -12,7 +12,7 @@ A simple, privacy-focused video calling application built with WebRTC. No accoun
 - **Resilient signaling** – WebSocket with SSE fallback when WS is blocked
 - **Adaptive multi-party rooms** – New-capable clients create group-capable rooms by default, with legacy-first rooms still capped at 2 participants
 - **Cross-platform clients** – Works in modern browsers and as native Android, iOS, and Windows applications
-- **Windows native client (WinUI 3)** – Native camera/microphone capture and rendering, adaptive rooms with up to four participants, WebSocket/SSE signaling, TURN refresh, and reconnect recovery
+- **Windows native client (WinUI 3)** – Native camera/microphone capture and rendering, adaptive rooms with up to four participants, persistent call preferences, WebSocket/SSE signaling, TURN refresh, and reconnect recovery
 - **Desktop screen sharing (web)** – In-call screen share control on desktop browsers that support `getDisplayMedia` (not shown on mobile browsers)
 - **Recent calls on home** – Web and Android home screens show your latest calls with live room occupancy (Android supports long-press remove)
 - **Android saved rooms** – Name and pin rooms on home, choose whether they appear above or below recent calls, and create links that add named rooms on recipient devices

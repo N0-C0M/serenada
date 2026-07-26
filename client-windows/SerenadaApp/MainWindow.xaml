@@ -56,12 +56,136 @@
                     HorizontalAlignment="Stretch"
                     Click="OnCreateRoomClick" />
 
+            <Button Content="Settings"
+                    Background="Transparent"
+                    Foreground="#94A3B8"
+                    BorderBrush="#334155"
+                    CornerRadius="8"
+                    Padding="24,10"
+                    HorizontalAlignment="Stretch"
+                    Click="OnSettingsClick" />
+
             <TextBlock x:Name="StatusLabel"
                        Text=""
                        FontSize="12"
                        Foreground="#94A3B8"
                        HorizontalAlignment="Center" />
         </StackPanel>
+
+        <Border x:Name="SettingsPanel"
+                Visibility="Collapsed"
+                Width="440"
+                Padding="28"
+                CornerRadius="16"
+                Background="#1E293B"
+                BorderBrush="#334155"
+                BorderThickness="1"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center">
+            <ScrollViewer MaxHeight="680"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Spacing="20">
+                <StackPanel Spacing="4">
+                    <TextBlock Text="Settings"
+                               Foreground="#F8FAFC"
+                               FontSize="26"
+                               FontWeight="SemiBold" />
+                    <TextBlock Text="These preferences apply when you join the next call."
+                               Foreground="#94A3B8"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Display name"
+                               Foreground="#CBD5E1" />
+                    <TextBox x:Name="DisplayNameInput"
+                             PlaceholderText="Your name"
+                             MaxLength="80"
+                             Background="#0F172A"
+                             Foreground="#F8FAFC"
+                             BorderBrush="#475569"
+                             CornerRadius="8"
+                             Padding="12,10" />
+                </StackPanel>
+
+                <ToggleSwitch x:Name="StartWithMicrophoneToggle"
+                              Header="Microphone on when joining"
+                              Foreground="#F8FAFC"
+                              IsOn="True" />
+
+                <ToggleSwitch x:Name="StartWithCameraToggle"
+                              Header="Camera on when joining"
+                              Foreground="#F8FAFC"
+                              IsOn="True" />
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Windows device permissions"
+                               Foreground="#CBD5E1" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition />
+                            <ColumnDefinition />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Content="Microphone"
+                                Background="#0F172A"
+                                Foreground="#CBD5E1"
+                                BorderBrush="#475569"
+                                CornerRadius="8"
+                                Padding="12,9"
+                                HorizontalAlignment="Stretch"
+                                Click="OnMicrophonePrivacyClick" />
+                        <Button Grid.Column="1"
+                                Content="Camera"
+                                Background="#0F172A"
+                                Foreground="#CBD5E1"
+                                BorderBrush="#475569"
+                                CornerRadius="8"
+                                Padding="12,9"
+                                HorizontalAlignment="Stretch"
+                                Click="OnCameraPrivacyClick" />
+                    </Grid>
+                </StackPanel>
+
+                <Button Content="Open diagnostic log folder"
+                        Background="Transparent"
+                        Foreground="#94A3B8"
+                        BorderBrush="#475569"
+                        CornerRadius="8"
+                        Padding="12,9"
+                        HorizontalAlignment="Stretch"
+                        Click="OnOpenLogsClick" />
+
+                <TextBlock x:Name="SettingsStatusLabel"
+                           Foreground="#FCA5A5"
+                           TextWrapping="Wrap" />
+
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition />
+                        <ColumnDefinition />
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0"
+                            Content="Cancel"
+                            Background="#334155"
+                            Foreground="#F8FAFC"
+                            CornerRadius="8"
+                            Padding="20,11"
+                            HorizontalAlignment="Stretch"
+                            Click="OnSettingsCancelClick" />
+                    <Button Grid.Column="1"
+                            Content="Save"
+                            Background="#2563EB"
+                            Foreground="White"
+                            CornerRadius="8"
+                            Padding="20,11"
+                            HorizontalAlignment="Stretch"
+                            Click="OnSettingsSaveClick" />
+                </Grid>
+              </StackPanel>
+            </ScrollViewer>
+        </Border>
 
         <!-- Call screen (hidden until a call is active) -->
         <Grid x:Name="CallPanel" Visibility="Collapsed" />

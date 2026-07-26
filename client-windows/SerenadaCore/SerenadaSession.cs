@@ -14,6 +14,8 @@ namespace Serenada.Core;
 /// </summary>
 public class SerenadaSession : IDisposable
 {
+    private const int PendingNegotiationMessageLimit = 512;
+
     private readonly SerenadaConfig _config;
     private readonly ISignalingProvider _signalingProvider;
     private readonly ISerenadaCoreDelegate? _delegate;
@@ -36,6 +38,7 @@ public class SerenadaSession : IDisposable
     private readonly List<Action<IRtcVideoTrack?>> _localVideoTrackListeners = [];
     private readonly List<Action<string, IRtcVideoTrack?>> _remoteVideoTrackListeners = [];
     private readonly Dictionary<string, IRtcVideoTrack> _remoteVideoTracks = [];
+    private readonly Queue<PeerMessage> _pendingNegotiationMessages = [];
 
     // ── Internal engines (created during Start) ───────────────
 
@@ -238,7 +241,10 @@ public class SerenadaSession : IDisposable
         if (_state.Phase is CallPhase.Joining or CallPhase.AwaitingPermissions)
         {
             _joinFlowCoordinator?.Cancel();
+            _signalingProvider.LeaveRoom();
             _signalingProvider.Disconnect();
+            _recoveryStorage.Clear();
+            _pendingNegotiationMessages.Clear();
             _state = _state with { Phase = CallPhase.Idle };
             CommitState();
         }
@@ -458,6 +464,7 @@ public class SerenadaSession : IDisposable
             _mediaEngine = null;
         }
         _remoteVideoTracks.Clear();
+        _pendingNegotiationMessages.Clear();
         _recoveryStorage.Clear();
 
         _state = new CallState();
@@ -512,7 +519,22 @@ public class SerenadaSession : IDisposable
     private void FailJoin(CallError error)
     {
         _joinFlowCoordinator?.Cancel();
-        _state = _state with { Phase = CallPhase.Error, Error = error };
+        _signalingProvider.LeaveRoom();
+        _signalingProvider.Disconnect();
+        _recoveryStorage.Clear();
+        _negotiationEngine?.Dispose();
+        _negotiationEngine = null;
+        _mediaEngine?.Release();
+        _mediaReady = false;
+        _pendingNegotiationMessages.Clear();
+        _remoteVideoTracks.Clear();
+        _state = _state with
+        {
+            Phase = CallPhase.Error,
+            Error = error,
+            ConnectionStatus = ConnectionStatus.Disconnected,
+            SignalingState = new SignalingState.Failed(error),
+        };
         CommitState();
     }
 
@@ -527,6 +549,8 @@ public class SerenadaSession : IDisposable
         _negotiationEngine?.Dispose();
         _negotiationEngine = null;
         _mediaEngine?.Release();
+        _mediaReady = false;
+        _pendingNegotiationMessages.Clear();
         _remoteVideoTracks.Clear();
 
         _delegate?.OnSessionEnded(this, reason);
@@ -636,6 +660,17 @@ public class SerenadaSession : IDisposable
 
         var localSignalingParticipant = payload.Participants
             .FirstOrDefault(p => p.Cid == _localCid);
+        var restoreSignaledMediaState =
+            payload.Reconnect is SignalingProtocolConstants.ReconnectReattached
+                or SignalingProtocolConstants.ReconnectRecovered;
+        var initialAudioEnabled = restoreSignaledMediaState
+            ? localSignalingParticipant?.AudioEnabled
+                ?? _config.DefaultAudioEnabled
+            : _config.DefaultAudioEnabled;
+        var initialVideoEnabled = restoreSignaledMediaState
+            ? localSignalingParticipant?.VideoEnabled
+                ?? _config.DefaultVideoEnabled
+            : _config.DefaultVideoEnabled;
         var remoteParticipants = payload.Participants
             .Where(p => p.Cid != _localCid)
             .Select(MapToRemoteParticipant)
@@ -652,12 +687,9 @@ public class SerenadaSession : IDisposable
                 Cid = _localCid,
                 DisplayName = localSignalingParticipant?.DisplayName ?? _displayName,
                 PeerId = localSignalingParticipant?.PeerId ?? _peerId,
-                AudioEnabled = localSignalingParticipant?.AudioEnabled
-                    ?? _config.DefaultAudioEnabled,
-                VideoEnabled = localSignalingParticipant?.VideoEnabled
-                    ?? _config.DefaultVideoEnabled,
-                CameraEnabled = localSignalingParticipant?.VideoEnabled
-                    ?? _config.DefaultVideoEnabled,
+                AudioEnabled = initialAudioEnabled,
+                VideoEnabled = initialVideoEnabled,
+                CameraEnabled = initialVideoEnabled,
                 IsHost = _localCid == payload.HostCid,
                 AvailableCameraModes = [],
             },
@@ -800,7 +832,21 @@ public class SerenadaSession : IDisposable
         }
         else
         {
-            _negotiationEngine?.ProcessSignalingPayload(message);
+            if (!_mediaReady)
+            {
+                if (_pendingNegotiationMessages.Count >=
+                    PendingNegotiationMessageLimit)
+                {
+                    _pendingNegotiationMessages.Dequeue();
+                    Log(SerenadaLogLevel.Warning, "Session",
+                        "Pending negotiation buffer is full; dropped the oldest message.");
+                }
+                _pendingNegotiationMessages.Enqueue(message);
+            }
+            else
+            {
+                _negotiationEngine?.ProcessSignalingPayload(message);
+            }
         }
 
         // Forward peer messages to listeners
@@ -907,6 +953,8 @@ public class SerenadaSession : IDisposable
             _mediaEngine.SetAudioEnabled(audioEnabled);
             _mediaEngine.SetVideoEnabled(videoEnabled);
             _mediaReady = true;
+            Log(SerenadaLogLevel.Info, "Session",
+                $"Local media and ICE are ready (audio={audioReady}, video={videoReady}).");
 
             HasMultipleCameras = videoReady && _mediaEngine.HasMultipleCameras;
             CanScreenShare = _mediaEngine.CanScreenShare;
@@ -925,6 +973,9 @@ public class SerenadaSession : IDisposable
             });
 
             BroadcastLocalMediaState();
+
+            while (_pendingNegotiationMessages.TryDequeue(out var message))
+                _negotiationEngine?.ProcessSignalingPayload(message);
 
             if (_currentRoomState != null)
                 _negotiationEngine?.SyncPeers(_currentRoomState);

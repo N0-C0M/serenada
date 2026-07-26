@@ -2,6 +2,7 @@ using Microsoft.UI.Xaml;
 using Serenada.CallUI;
 using Serenada.Core;
 using Serenada.Core.Models;
+using System.Diagnostics;
 
 namespace SerenadaApp;
 
@@ -10,7 +11,8 @@ namespace SerenadaApp;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
-    private readonly SerenadaCore _serenada;
+    private SerenadaCore _serenada;
+    private AppSettings _settings;
     private SerenadaSession? _currentSession;
 
     public MainWindow()
@@ -19,10 +21,8 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         Closed += (_, _) => EndActiveSession();
 
-        _serenada = new SerenadaCore(new SerenadaConfig
-        {
-            ServerHost = "serenada.app",
-        });
+        _settings = AppSettings.Load();
+        _serenada = CreateCore(_settings);
 
         var recovery = _serenada.GetRecoverableSession();
         if (recovery != null)
@@ -42,6 +42,72 @@ public sealed partial class MainWindow : Window
         }
 
         JoinCall(url);
+    }
+
+    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        DisplayNameInput.Text = _settings.DisplayName;
+        StartWithMicrophoneToggle.IsOn = _settings.StartWithMicrophone;
+        StartWithCameraToggle.IsOn = _settings.StartWithCamera;
+        SettingsStatusLabel.Text = string.Empty;
+        HomePanel.Visibility = Visibility.Collapsed;
+        SettingsPanel.Visibility = Visibility.Visible;
+    }
+
+    private void OnSettingsCancelClick(object sender, RoutedEventArgs e)
+    {
+        SettingsPanel.Visibility = Visibility.Collapsed;
+        HomePanel.Visibility = Visibility.Visible;
+    }
+
+    private void OnSettingsSaveClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            _settings = new AppSettings
+            {
+                DisplayName = DisplayNameInput.Text?.Trim() ?? string.Empty,
+                StartWithMicrophone = StartWithMicrophoneToggle.IsOn,
+                StartWithCamera = StartWithCameraToggle.IsOn,
+            };
+            _settings.Save();
+            _serenada = CreateCore(_settings);
+            SettingsPanel.Visibility = Visibility.Collapsed;
+            HomePanel.Visibility = Visibility.Visible;
+            StatusLabel.Text = "Settings saved.";
+        }
+        catch (Exception ex)
+        {
+            SettingsStatusLabel.Text = $"Could not save settings: {ex.Message}";
+        }
+    }
+
+    private async void OnMicrophonePrivacyClick(object sender, RoutedEventArgs e)
+    {
+        await OpenPrivacySettingsAsync("ms-settings:privacy-microphone");
+    }
+
+    private async void OnCameraPrivacyClick(object sender, RoutedEventArgs e)
+    {
+        await OpenPrivacySettingsAsync("ms-settings:privacy-webcam");
+    }
+
+    private void OnOpenLogsClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(FileSerenadaLogger.LogDirectory);
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = FileSerenadaLogger.LogDirectory,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception ex)
+        {
+            SettingsStatusLabel.Text =
+                $"Could not open the diagnostic folder: {ex.Message}";
+        }
     }
 
     private async void OnCreateRoomClick(object sender, RoutedEventArgs e)
@@ -75,8 +141,8 @@ public sealed partial class MainWindow : Window
             CallPanel.Children.Clear();
 
             _currentSession = recovery == null
-                ? _serenada.Join(url: url)
-                : _serenada.Rejoin(recovery);
+                ? _serenada.Join(url: url, displayName: DisplayNameOrNull())
+                : _serenada.Rejoin(recovery, displayName: DisplayNameOrNull());
 
             HomePanel.Visibility = Visibility.Collapsed;
             CallPanel.Visibility = Visibility.Visible;
@@ -122,5 +188,38 @@ public sealed partial class MainWindow : Window
     {
         _currentSession?.Dispose();
         _currentSession = null;
+    }
+
+    private static SerenadaCore CreateCore(AppSettings settings)
+    {
+        return new SerenadaCore(new SerenadaConfig
+        {
+            ServerHost = "serenada.app",
+            DefaultAudioEnabled = settings.StartWithMicrophone,
+            DefaultVideoEnabled = settings.StartWithCamera,
+            Logger = FileSerenadaLogger.Instance,
+        });
+    }
+
+    private string? DisplayNameOrNull()
+    {
+        return string.IsNullOrWhiteSpace(_settings.DisplayName)
+            ? null
+            : _settings.DisplayName;
+    }
+
+    private async Task OpenPrivacySettingsAsync(string uri)
+    {
+        try
+        {
+            var launched = await Windows.System.Launcher.LaunchUriAsync(new Uri(uri));
+            if (!launched)
+                SettingsStatusLabel.Text = "Windows could not open the privacy settings.";
+        }
+        catch (Exception ex)
+        {
+            SettingsStatusLabel.Text =
+                $"Could not open the privacy settings: {ex.Message}";
+        }
     }
 }

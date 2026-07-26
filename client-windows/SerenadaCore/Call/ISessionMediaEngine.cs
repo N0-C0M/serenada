@@ -46,7 +46,8 @@ internal interface ISessionMediaEngine : IDisposable
 
     /// <summary>Create a peer connection slot for a new remote participant.</summary>
     IPeerConnectionSlot CreateSlot(RemoteParticipant participant,
-        IPeerConnectionSlotCallbacks callbacks);
+        IPeerConnectionSlotCallbacks callbacks,
+        bool isOfferOwner);
 
     /// <summary>Remove a peer slot.</summary>
     void RemoveSlot(IPeerConnectionSlot slot);

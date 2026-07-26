@@ -29,35 +29,33 @@ public sealed class MrWebRtcPlatform : IRtcPlatform
 
 internal sealed class MrPeerConnectionFactory : IRtcPeerConnectionFactory
 {
-    public IRtcPeerConnection CreatePeerConnection(
+    public async Task<IRtcPeerConnection> CreatePeerConnectionAsync(
         RtcConfiguration config, IRtcPeerConnectionObserver observer)
     {
         var pc = new MrPeerConnection(observer);
-        pc.InitializeAsync(MrAdapterHelper.ToNativeConfig(config)).GetAwaiter().GetResult();
+        await pc.InitializeAsync(MrAdapterHelper.ToNativeConfig(config));
         return pc;
     }
 
-    public IRtcVideoSource CreateVideoSource(bool isScreencast)
+    public async Task<IRtcVideoSource> CreateVideoSourceAsync(bool isScreencast)
     {
         if (isScreencast)
             return new MrExternalVideoSource();
 
-        var devices = DeviceVideoTrackSource.GetCaptureDevicesAsync().GetAwaiter().GetResult();
+        var devices = await DeviceVideoTrackSource.GetCaptureDevicesAsync();
         if (devices.Count == 0)
             throw new InvalidOperationException("No video capture devices found.");
 
-        var native = DeviceVideoTrackSource.CreateAsync(
-            new LocalVideoDeviceInitConfig { videoDevice = devices[0] })
-            .GetAwaiter().GetResult();
+        var native = await DeviceVideoTrackSource.CreateAsync(
+            new LocalVideoDeviceInitConfig { videoDevice = devices[0] });
 
         return new MrDeviceVideoSource(native);
     }
 
-    public IRtcAudioSource CreateAudioSource()
+    public async Task<IRtcAudioSource> CreateAudioSourceAsync()
     {
-        var source = DeviceAudioTrackSource.CreateAsync(new LocalAudioDeviceInitConfig())
-            .GetAwaiter()
-            .GetResult();
+        var source = await DeviceAudioTrackSource.CreateAsync(
+            new LocalAudioDeviceInitConfig());
         return new MrAudioSource(source);
     }
 
@@ -295,6 +293,7 @@ internal sealed class MrPeerConnection : IRtcPeerConnection
             throw new ObjectDisposedException(nameof(MrPeerConnection));
 
         await _pc.SetRemoteDescriptionAsync(MrAdapterHelper.ToNativeSdp(desc));
+        RefreshTransceivers();
         SetSignalingState(desc.Type == RtcSdpType.Offer
             ? RtcSignalingState.HaveRemoteOffer
             : RtcSignalingState.Stable);

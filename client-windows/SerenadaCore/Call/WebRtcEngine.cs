@@ -71,7 +71,7 @@ internal class WebRtcEngine : ISessionMediaEngine
 
         try
         {
-            _localAudioSource = _factory.CreateAudioSource();
+            _localAudioSource = await _factory.CreateAudioSourceAsync();
             _localAudioTrack = _factory.CreateAudioTrack("local_audio", _localAudioSource);
             _localAudioTrack.Enabled = _config.DefaultAudioEnabled;
         }
@@ -238,7 +238,9 @@ internal class WebRtcEngine : ISessionMediaEngine
     // ── Slots ────────────────────────────────────────────────
 
     public IPeerConnectionSlot CreateSlot(
-        RemoteParticipant participant, IPeerConnectionSlotCallbacks callbacks)
+        RemoteParticipant participant,
+        IPeerConnectionSlotCallbacks callbacks,
+        bool isOfferOwner)
     {
         _factory ??= CreateFactory();
 
@@ -252,6 +254,7 @@ internal class WebRtcEngine : ISessionMediaEngine
             localVideoTrack: _localVideoTrack,
             localContentVideoTrack: _localContentVideoTrack,
             videoMediaEnabled: _config.VideoMediaEnabled,
+            isOfferOwner: isOfferOwner,
             rtcConfiguration: _rtcConfiguration,
             logger: _logger);
 
