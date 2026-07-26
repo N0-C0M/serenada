@@ -12,73 +12,140 @@
         <MicaBackdrop />
     </Window.SystemBackdrop>
 
-    <Grid x:Name="RootGrid">
+    <Grid x:Name="RootGrid"
+          Background="#0B1220"
+          RequestedTheme="Dark">
         <!-- Home screen: room creation and join -->
-        <StackPanel x:Name="HomePanel"
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Spacing="16"
-                    Width="400">
-            <TextBlock Text="Serenada"
-                       FontSize="32"
-                       FontWeight="Bold"
-                       HorizontalAlignment="Center"
-                       Foreground="#F8FAFC" />
-            <TextBlock Text="Privacy-first video calling"
-                       FontSize="14"
-                       HorizontalAlignment="Center"
-                       Foreground="#64748B"
-                       Margin="0,0,0,16" />
+        <ScrollViewer x:Name="HomePanel"
+                      Width="520"
+                      HorizontalAlignment="Center"
+                      VerticalAlignment="Stretch"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled">
+            <StackPanel Spacing="16"
+                        Margin="24,32">
+                <TextBlock Text="Serenada"
+                           FontSize="32"
+                           FontWeight="Bold"
+                           HorizontalAlignment="Center"
+                           Foreground="#F8FAFC" />
+                <TextBlock Text="Privacy-first video calling"
+                           FontSize="14"
+                           HorizontalAlignment="Center"
+                           Foreground="#CBD5E1"
+                           Margin="0,0,0,16" />
 
-            <TextBox x:Name="RoomUrlInput"
-                     PlaceholderText="Paste a call link..."
-                     Background="#1E293B"
-                     Foreground="#F8FAFC"
-                     BorderBrush="#334155"
-                     CornerRadius="8"
-                     Padding="12,10" />
+                <TextBox x:Name="RoomUrlInput"
+                         PlaceholderText="Paste a call link or room ID..."
+                         PlaceholderForeground="#94A3B8"
+                         Background="#111827"
+                         Foreground="#F8FAFC"
+                         BorderBrush="#64748B"
+                         CornerRadius="8"
+                         Padding="12,10" />
 
-            <Button x:Name="JoinButton"
-                    Content="Join Call"
-                    Background="#2563EB"
-                    Foreground="White"
-                    CornerRadius="8"
-                    Padding="24,12"
-                    HorizontalAlignment="Stretch"
-                    Click="OnJoinClick" />
+                <Button x:Name="JoinButton"
+                        Content="Join Call"
+                        Background="#2563EB"
+                        Foreground="White"
+                        CornerRadius="8"
+                        Padding="24,12"
+                        HorizontalAlignment="Stretch"
+                        Click="OnJoinClick" />
 
-            <Button x:Name="CreateRoomButton"
-                    Content="Create New Room"
-                    Background="#334155"
-                    Foreground="#F8FAFC"
-                    CornerRadius="8"
-                    Padding="24,12"
-                    HorizontalAlignment="Stretch"
-                    Click="OnCreateRoomClick" />
+                <Button x:Name="CreateRoomButton"
+                        Content="Create New Room"
+                        Background="#334155"
+                        Foreground="#F8FAFC"
+                        BorderBrush="#64748B"
+                        CornerRadius="8"
+                        Padding="24,12"
+                        HorizontalAlignment="Stretch"
+                        Click="OnCreateRoomClick" />
 
-            <Button Content="Settings"
-                    Background="Transparent"
-                    Foreground="#94A3B8"
-                    BorderBrush="#334155"
-                    CornerRadius="8"
-                    Padding="24,10"
-                    HorizontalAlignment="Stretch"
-                    Click="OnSettingsClick" />
+                <Border Background="#111827"
+                        BorderBrush="#475569"
+                        BorderThickness="1"
+                        CornerRadius="12"
+                        Padding="16"
+                        Margin="0,8,0,0">
+                    <StackPanel Spacing="12">
+                        <TextBlock Text="Saved rooms"
+                                   Foreground="#F8FAFC"
+                                   FontSize="18"
+                                   FontWeight="SemiBold" />
+                        <TextBlock Text="Keep named rooms and share links that save the room on another device."
+                                   Foreground="#CBD5E1"
+                                   TextWrapping="Wrap" />
+                        <TextBox x:Name="SavedRoomNameInput"
+                                 PlaceholderText="Room name"
+                                 PlaceholderForeground="#94A3B8"
+                                 MaxLength="120"
+                                 Background="#0B1220"
+                                 Foreground="#F8FAFC"
+                                 BorderBrush="#64748B"
+                                 CornerRadius="8"
+                                 Padding="12,9" />
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition />
+                                <ColumnDefinition />
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Content="Save pasted room"
+                                    Background="#334155"
+                                    Foreground="#F8FAFC"
+                                    BorderBrush="#64748B"
+                                    CornerRadius="8"
+                                    Padding="12,9"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnSaveRoomLinkClick" />
+                            <Button x:Name="CreateSavedRoomButton"
+                                    Grid.Column="1"
+                                    Content="Create named room"
+                                    Background="#2563EB"
+                                    Foreground="White"
+                                    CornerRadius="8"
+                                    Padding="12,9"
+                                    HorizontalAlignment="Stretch"
+                                    Click="OnCreateSavedRoomClick" />
+                        </Grid>
+                        <TextBlock x:Name="SavedRoomsEmptyText"
+                                   Text="No saved rooms yet."
+                                   Foreground="#CBD5E1"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,8" />
+                        <StackPanel x:Name="SavedRoomsList"
+                                    Spacing="8" />
+                    </StackPanel>
+                </Border>
 
-            <TextBlock x:Name="StatusLabel"
-                       Text=""
-                       FontSize="12"
-                       Foreground="#94A3B8"
-                       HorizontalAlignment="Center" />
-        </StackPanel>
+                <Button Content="Settings"
+                        Background="#111827"
+                        Foreground="#F8FAFC"
+                        BorderBrush="#64748B"
+                        CornerRadius="8"
+                        Padding="24,10"
+                        HorizontalAlignment="Stretch"
+                        Click="OnSettingsClick" />
+
+                <TextBlock x:Name="StatusLabel"
+                           Text=""
+                           FontSize="13"
+                           Foreground="#E2E8F0"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+            </StackPanel>
+        </ScrollViewer>
 
         <Border x:Name="SettingsPanel"
                 Visibility="Collapsed"
                 Width="440"
                 Padding="28"
                 CornerRadius="16"
-                Background="#1E293B"
-                BorderBrush="#334155"
+                Background="#111827"
+                BorderBrush="#64748B"
                 BorderThickness="1"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center">
@@ -92,19 +159,39 @@
                                FontSize="26"
                                FontWeight="SemiBold" />
                     <TextBlock Text="These preferences apply when you join the next call."
-                               Foreground="#94A3B8"
+                               Foreground="#CBD5E1"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Server host"
+                               Foreground="#F8FAFC" />
+                    <ComboBox x:Name="ServerHostInput"
+                              IsEditable="True"
+                              PlaceholderText="Server hostname"
+                              Background="#0B1220"
+                              Foreground="#F8FAFC"
+                              BorderBrush="#64748B"
+                              HorizontalAlignment="Stretch">
+                        <ComboBoxItem Content="serenada.app" />
+                        <ComboBoxItem Content="serenada-app.ru" />
+                    </ComboBox>
+                    <TextBlock Text="Choose Global, Russia, or type a custom Serenada host."
+                               Foreground="#CBD5E1"
+                               FontSize="12"
                                TextWrapping="Wrap" />
                 </StackPanel>
 
                 <StackPanel Spacing="8">
                     <TextBlock Text="Display name"
-                               Foreground="#CBD5E1" />
+                               Foreground="#F8FAFC" />
                     <TextBox x:Name="DisplayNameInput"
                              PlaceholderText="Your name"
+                             PlaceholderForeground="#94A3B8"
                              MaxLength="80"
-                             Background="#0F172A"
+                             Background="#0B1220"
                              Foreground="#F8FAFC"
-                             BorderBrush="#475569"
+                             BorderBrush="#64748B"
                              CornerRadius="8"
                              Padding="12,10" />
                 </StackPanel>
@@ -129,18 +216,18 @@
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0"
                                 Content="Microphone"
-                                Background="#0F172A"
-                                Foreground="#CBD5E1"
-                                BorderBrush="#475569"
+                                Background="#0B1220"
+                                Foreground="#F8FAFC"
+                                BorderBrush="#64748B"
                                 CornerRadius="8"
                                 Padding="12,9"
                                 HorizontalAlignment="Stretch"
                                 Click="OnMicrophonePrivacyClick" />
                         <Button Grid.Column="1"
                                 Content="Camera"
-                                Background="#0F172A"
-                                Foreground="#CBD5E1"
-                                BorderBrush="#475569"
+                                Background="#0B1220"
+                                Foreground="#F8FAFC"
+                                BorderBrush="#64748B"
                                 CornerRadius="8"
                                 Padding="12,9"
                                 HorizontalAlignment="Stretch"
@@ -149,9 +236,9 @@
                 </StackPanel>
 
                 <Button Content="Open diagnostic log folder"
-                        Background="Transparent"
-                        Foreground="#94A3B8"
-                        BorderBrush="#475569"
+                        Background="#0B1220"
+                        Foreground="#F8FAFC"
+                        BorderBrush="#64748B"
                         CornerRadius="8"
                         Padding="12,9"
                         HorizontalAlignment="Stretch"
@@ -174,7 +261,8 @@
                             Padding="20,11"
                             HorizontalAlignment="Stretch"
                             Click="OnSettingsCancelClick" />
-                    <Button Grid.Column="1"
+                    <Button x:Name="SettingsSaveButton"
+                            Grid.Column="1"
                             Content="Save"
                             Background="#2563EB"
                             Foreground="White"

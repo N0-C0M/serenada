@@ -98,28 +98,39 @@ internal sealed class VideoFramePresenter : IRtcVideoSink, IDisposable
             _pendingFrame = null;
         }
 
-        if (frame != null)
+        try
         {
-            if (_bitmap == null ||
-                _bitmap.PixelWidth != frame.Width ||
-                _bitmap.PixelHeight != frame.Height)
+            if (frame != null)
             {
-                _bitmap = new WriteableBitmap(frame.Width, frame.Height);
-                _image.Source = _bitmap;
+                if (_bitmap == null ||
+                    _bitmap.PixelWidth != frame.Width ||
+                    _bitmap.PixelHeight != frame.Height)
+                {
+                    _bitmap = new WriteableBitmap(frame.Width, frame.Height);
+                    _image.Source = _bitmap;
+                }
+
+                using var stream = _bitmap.PixelBuffer.AsStream();
+                stream.Position = 0;
+                stream.Write(frame.Data, 0, frame.Data.Length);
+                _bitmap.Invalidate();
+                _image.Visibility = Visibility.Visible;
             }
-
-            using var stream = _bitmap.PixelBuffer.AsStream();
-            stream.Position = 0;
-            stream.Write(frame.Data, 0, frame.Data.Length);
-            _bitmap.Invalidate();
-            _image.Visibility = Visibility.Visible;
         }
-
-        Interlocked.Exchange(ref _renderQueued, 0);
-        lock (_frameLock)
+        catch
         {
-            if (_pendingFrame != null)
-                QueueRender();
+            // A transient bitmap failure must not stop later video frames.
+        }
+        finally
+        {
+            // Never leave the presenter permanently stuck if WinUI rejects a
+            // transient bitmap update while the control is unloading.
+            Interlocked.Exchange(ref _renderQueued, 0);
+            lock (_frameLock)
+            {
+                if (_pendingFrame != null)
+                    QueueRender();
+            }
         }
     }
 

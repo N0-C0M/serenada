@@ -10,6 +10,7 @@ internal sealed record AppSettings
     };
 
     public string DisplayName { get; init; } = string.Empty;
+    public string ServerHost { get; init; } = HostUtilities.DefaultHost;
     public bool StartWithMicrophone { get; init; } = true;
     public bool StartWithCamera { get; init; } = true;
 

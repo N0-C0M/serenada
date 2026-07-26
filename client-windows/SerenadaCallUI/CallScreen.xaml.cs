@@ -252,6 +252,7 @@ public sealed partial class CallScreen : UserControl, IDisposable
         private readonly VideoFramePresenter _presenter;
         private bool _hasTrack;
         private bool _videoEnabled;
+        private bool _cameraReceiving;
 
         public Grid Root { get; }
 
@@ -276,7 +277,7 @@ public sealed partial class CallScreen : UserControl, IDisposable
                 Glyph = "\uE714",
                 FontSize = 52,
                 Foreground = new SolidColorBrush(
-                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x47, 0x55, 0x69)),
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xCB, 0xD5, 0xE1)),
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
             });
@@ -307,17 +308,11 @@ public sealed partial class CallScreen : UserControl, IDisposable
         public void Update(RemoteParticipant participant)
         {
             _videoEnabled = participant.VideoEnabled;
+            _cameraReceiving = participant.CameraReceiving;
             _name.Text = string.IsNullOrWhiteSpace(participant.DisplayName)
                 ? "Participant"
                 : participant.DisplayName;
-            _placeholder.Visibility =
-                _videoEnabled && _hasTrack
-                    ? Visibility.Collapsed
-                    : Visibility.Visible;
-            _image.Visibility =
-                _videoEnabled && _hasTrack
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
+            UpdateVideoVisibility();
             Root.Opacity = participant.PresumedLost ? 0.55 : 1.0;
         }
 
@@ -325,10 +320,19 @@ public sealed partial class CallScreen : UserControl, IDisposable
         {
             _hasTrack = track != null;
             _presenter.SetTrack(track);
-            _placeholder.Visibility = _videoEnabled && _hasTrack
+            UpdateVideoVisibility();
+        }
+
+        private void UpdateVideoVisibility()
+        {
+            // A received WebRTC track is the authoritative signal that a
+            // camera can be rendered. CameraReceiving prevents a delayed
+            // participant_media_state message from covering live video.
+            var showVideo = _hasTrack && (_videoEnabled || _cameraReceiving);
+            _placeholder.Visibility = showVideo
                 ? Visibility.Collapsed
                 : Visibility.Visible;
-            _image.Visibility = _videoEnabled && _hasTrack
+            _image.Visibility = showVideo
                 ? Visibility.Visible
                 : Visibility.Collapsed;
         }

@@ -822,6 +822,9 @@ public class SerenadaSession : IDisposable
                                 AudioEnabled = mediaState.AudioEnabled,
                                 VideoEnabled = mediaState.VideoEnabled,
                                 CameraEnabled = mediaState.VideoEnabled,
+                                CameraReceiving =
+                                    mediaState.VideoEnabled &&
+                                    p.CameraReceiving,
                             }
                             : p)
                         .ToList()

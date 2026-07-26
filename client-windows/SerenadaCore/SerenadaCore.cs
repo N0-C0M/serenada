@@ -161,6 +161,21 @@ public class SerenadaCore
         return new CreateRoomResult(roomId, roomUrl);
     }
 
+    /// <summary>
+    /// Validate that a host is reachable and exposes the Serenada room API.
+    /// </summary>
+    public Task<bool> ValidateServerHostAsync(
+        string serverHost,
+        CancellationToken cancellationToken = default)
+    {
+        AssertMainThread();
+        if (string.IsNullOrWhiteSpace(serverHost))
+            return Task.FromResult(false);
+        return _apiClient.ValidateServerHostAsync(
+            serverHost,
+            cancellationToken);
+    }
+
     // ── Internal join logic ───────────────────────────────────
 
     internal SerenadaSession JoinInternal(

@@ -13,13 +13,21 @@ Supported in the current build:
 - adaptive calls with up to four participants;
 - WebSocket signaling with SSE fallback;
 - TURN credential and reconnect-token refresh;
-- automatic transport and per-peer media recovery.
+- automatic transport and per-peer media recovery;
 - non-blocking native media and peer-connection startup;
-- persistent display-name, microphone, and camera join preferences.
+- persistent display-name, microphone, camera, and server-host preferences;
+- named saved rooms with join, copy-link, and remove actions.
 
 The Settings screen also links directly to the Windows microphone and camera
-privacy pages. Diagnostic logs are available from Settings and are stored in
-`%LOCALAPPDATA%\Serenada\serenada.log`.
+privacy pages. The server picker includes `serenada.app`, `serenada-app.ru`,
+and custom hosts; a host is persisted only after its Serenada room endpoint
+passes validation. Diagnostic logs are available from Settings and are stored
+in `%LOCALAPPDATA%\Serenada\serenada.log`.
+
+Saved rooms are stored locally in
+`%LOCALAPPDATA%\Serenada\saved-rooms.json`. A named room link uses
+`/call/{roomId}?host={host}&name={roomName}`; pasting it into the Windows
+client saves the room instead of joining immediately, matching Android.
 
 Native Windows screen capture is not implemented yet, so the client does not
 advertise independent content video and the call UI hides the screen-share

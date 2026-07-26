@@ -100,7 +100,16 @@ internal class CoreApiClient : IDisposable
             var url = $"{HttpsBaseUrl(serverHost)}/api/room-id";
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             using var response = await _httpClient.SendAsync(request, ct);
-            return response.IsSuccessStatusCode;
+            if (!response.IsSuccessStatusCode)
+                return false;
+
+            var result = await response.Content.ReadFromJsonAsync<RoomIdResponse>(
+                JsonOptions,
+                ct);
+            return result?.RoomId is { Length: 27 } roomId &&
+                roomId.All(character =>
+                    char.IsAsciiLetterOrDigit(character) ||
+                    character is '_' or '-');
         }
         catch
         {
