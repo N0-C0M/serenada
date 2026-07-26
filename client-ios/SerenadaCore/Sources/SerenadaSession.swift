@@ -273,6 +273,15 @@ public final class SerenadaSession: ObservableObject {
     private var cameraPermissionRequestInFlight = false
     private var isScreenShareStartPending = false
     private var screenShareStartRequestSerial: Int64 = 0
+    /// Legacy path only: the user's video preference captured at screen-share
+    /// start, restored on stop so ending a share returns video to its pre-share
+    /// state (e.g. a call that began audio-only goes back to video-off) instead
+    /// of leaving the camera live.
+    private var preScreenShareVideoPreferred = false
+    /// Legacy path only: set when the user explicitly toggles video during a
+    /// share. Suppresses the pre-share restore on stop so a deliberate in-share
+    /// choice (e.g. turning the camera off while sharing) survives the share.
+    private var userChangedVideoDuringScreenShare = false
     private var isVideoPausedByProximity = false
     private var reconnectRecoveryPending = false
     // True between transport reconnect and the first authoritative room_state
@@ -718,6 +727,11 @@ public final class SerenadaSession: ObservableObject {
         if enabled && !ensureCameraPermissionForVideoEnable(broadcastMediaStateOnGrant: broadcastMediaState) {
             return
         }
+        // An explicit toggle during a live/pending share is a deliberate choice
+        // that must outlive the share, so stop won't restore the pre-share value.
+        if diagnostics.isScreenSharing || isScreenShareStartPending {
+            userChangedVideoDuringScreenShare = true
+        }
         userPreferredVideoEnabled = enabled
         applyLocalVideoPreference()
         if broadcastMediaState {
@@ -746,6 +760,10 @@ public final class SerenadaSession: ObservableObject {
     /// broadcast confirms.
     private func startScreenShareLegacy() {
         let wasVideoPreferred = userPreferredVideoEnabled
+        // Remember the pre-share preference so stopScreenShare can restore it
+        // (the camera is force-enabled below for the duration of the share).
+        preScreenShareVideoPreferred = wasVideoPreferred
+        userChangedVideoDuringScreenShare = false
         userPreferredVideoEnabled = true
         let requestSerial = beginScreenShareStartRequest()
         let startedRequest = webRtcEngine.startScreenShare { [weak self] started in
@@ -761,6 +779,14 @@ public final class SerenadaSession: ObservableObject {
                 }
                 self.broadcastLocalContentState(active: true, contentType: ContentTypeWire.screenShare)
                 self.applyLocalVideoPreference()
+                // Legacy screen share reuses the single camera video track, and the
+                // remote renders that surface only when the peer's advertised
+                // `videoEnabled` is true. Starting a share from a video-off call
+                // force-enables the local track but, without this, never tells the
+                // peer — so the receiver sees frames' m-line but renders nothing.
+                // `toggleVideo()` (the manual path) broadcasts media state; the
+                // screen-share start path must do the same.
+                self.broadcastLocalMediaState()
             }
         }
         if !startedRequest {
@@ -2591,7 +2617,16 @@ public final class SerenadaSession: ObservableObject {
                 }
                 self.commitSnapshot { _, d in d.isScreenSharing = false; d.cameraZoomFactor = 1 }
                 self.broadcastLocalContentState(active: false)
+                // Restore the pre-share video preference (start force-enabled it)
+                // UNLESS the user explicitly changed video during the share, in
+                // which case that deliberate choice wins. Then broadcast so the
+                // peer learns the resulting videoEnabled state — a call that began
+                // audio-only returns to video-off instead of leaving the camera live.
+                if !self.userChangedVideoDuringScreenShare {
+                    self.userPreferredVideoEnabled = self.preScreenShareVideoPreferred
+                }
                 self.applyLocalVideoPreference()
+                self.broadcastLocalMediaState()
             }
         }
         webRtcEngine.setOnZoomFactorChanged { [weak self] z in

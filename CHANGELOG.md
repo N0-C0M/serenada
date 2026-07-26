@@ -4,6 +4,18 @@ All notable changes to the Serenada SDK are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.9.3] — 2026-07-23
+
+### Fixed
+- iOS: legacy screen share started from a video-off call now becomes visible to
+  remote peers.
+
+## [0.9.2] — 2026-07-22
+
+### Changed
+- iOS: updated the bundled `zello-ios-web-rtc` package pin used by the
+  SwiftPM-based SDK build.
+
 ## [0.9.1] — 2026-07-04
 
 ### Added
