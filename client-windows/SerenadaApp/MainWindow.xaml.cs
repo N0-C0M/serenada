@@ -342,6 +342,10 @@ public sealed partial class MainWindow : Window
                 ScreenSharingEnabled = false,
                 InviteControlsEnabled = false,
                 EndCallEnabled = true,
+                DiagnosticLog = message => FileSerenadaLogger.Instance.Log(
+                    SerenadaLogLevel.Info,
+                    "CallUI",
+                    message),
             },
             OnEndCall = ReturnHomeAfterCall,
             OnDismiss = ReturnHomeAfterCall,

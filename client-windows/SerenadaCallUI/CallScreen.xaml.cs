@@ -154,7 +154,10 @@ public sealed partial class CallScreen : UserControl, IDisposable
         {
             if (!_remoteTiles.TryGetValue(participant.Cid, out var tile))
             {
-                tile = new RemoteTile(participant.Cid);
+                tile = new RemoteTile(
+                    participant.Cid,
+                    message => _config.DiagnosticLog?.Invoke(
+                        $"Remote video {participant.Cid}: {message}"));
                 _remoteTiles[participant.Cid] = tile;
             }
             tile.Update(participant);
@@ -251,12 +254,15 @@ public sealed partial class CallScreen : UserControl, IDisposable
         private readonly TextBlock _name;
         private readonly VideoFramePresenter _presenter;
         private bool _hasTrack;
+        private bool _hasFrame;
         private bool _videoEnabled;
         private bool _cameraReceiving;
 
         public Grid Root { get; }
 
-        public RemoteTile(string cid)
+        public RemoteTile(
+            string cid,
+            Action<string>? diagnosticLog)
         {
             _image = new Image { Stretch = Stretch.UniformToFill };
             _name = new TextBlock
@@ -302,7 +308,14 @@ public sealed partial class CallScreen : UserControl, IDisposable
             Root.Children.Add(_image);
             Root.Children.Add(_placeholder);
             Root.Children.Add(nameBackground);
-            _presenter = new VideoFramePresenter(_image);
+            _presenter = new VideoFramePresenter(
+                _image,
+                hasFrame =>
+                {
+                    _hasFrame = hasFrame;
+                    UpdateVideoVisibility();
+                },
+                diagnosticLog);
         }
 
         public void Update(RemoteParticipant participant)
@@ -319,6 +332,7 @@ public sealed partial class CallScreen : UserControl, IDisposable
         public void SetTrack(IRtcVideoTrack? track)
         {
             _hasTrack = track != null;
+            _hasFrame = false;
             _presenter.SetTrack(track);
             UpdateVideoVisibility();
         }
@@ -328,7 +342,10 @@ public sealed partial class CallScreen : UserControl, IDisposable
             // A received WebRTC track is the authoritative signal that a
             // camera can be rendered. CameraReceiving prevents a delayed
             // participant_media_state message from covering live video.
-            var showVideo = _hasTrack && (_videoEnabled || _cameraReceiving);
+            var showVideo =
+                _hasTrack &&
+                _hasFrame &&
+                (_videoEnabled || _cameraReceiving);
             _placeholder.Visibility = showVideo
                 ? Visibility.Collapsed
                 : Visibility.Visible;

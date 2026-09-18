@@ -16,17 +16,27 @@ internal sealed class VideoFramePresenter : IRtcVideoSink, IDisposable
     private readonly Image _image;
     private readonly DispatcherQueue _dispatcher;
     private readonly object _frameLock = new();
+    private readonly Action<bool>? _onFrameAvailabilityChanged;
+    private readonly Action<string>? _diagnosticLog;
 
     private IRtcVideoTrack? _track;
     private PendingFrame? _pendingFrame;
     private WriteableBitmap? _bitmap;
     private int _renderQueued;
+    private int _firstFrameReceived;
+    private int _firstFramePresented;
+    private int _renderErrorReported;
     private bool _disposed;
 
-    public VideoFramePresenter(Image image)
+    public VideoFramePresenter(
+        Image image,
+        Action<bool>? onFrameAvailabilityChanged = null,
+        Action<string>? diagnosticLog = null)
     {
         _image = image;
         _dispatcher = image.DispatcherQueue;
+        _onFrameAvailabilityChanged = onFrameAvailabilityChanged;
+        _diagnosticLog = diagnosticLog;
     }
 
     public void SetTrack(IRtcVideoTrack? track)
@@ -36,8 +46,12 @@ internal sealed class VideoFramePresenter : IRtcVideoSink, IDisposable
 
         _track?.RemoveSink(this);
         _track = track;
+        Interlocked.Exchange(ref _firstFrameReceived, 0);
+        Interlocked.Exchange(ref _firstFramePresented, 0);
+        Interlocked.Exchange(ref _renderErrorReported, 0);
         _bitmap = null;
         _image.Source = null;
+        _onFrameAvailabilityChanged?.Invoke(false);
         _image.Visibility = track == null
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -51,6 +65,13 @@ internal sealed class VideoFramePresenter : IRtcVideoSink, IDisposable
 
         var data = new byte[checked(frame.Stride * frame.Height)];
         frame.CopyTo(data);
+        EnsureOpaqueBgra(data, frame.Width, frame.Height, frame.Stride);
+        if (Interlocked.Exchange(ref _firstFrameReceived, 1) == 0)
+        {
+            _diagnosticLog?.Invoke(
+                $"first frame received: {frame.Width}x{frame.Height}, " +
+                $"stride={frame.Stride}, black={frame.IsBlack}");
+        }
         lock (_frameLock)
         {
             _pendingFrame = new PendingFrame(
@@ -115,11 +136,22 @@ internal sealed class VideoFramePresenter : IRtcVideoSink, IDisposable
                 stream.Write(frame.Data, 0, frame.Data.Length);
                 _bitmap.Invalidate();
                 _image.Visibility = Visibility.Visible;
+                if (Interlocked.Exchange(ref _firstFramePresented, 1) == 0)
+                {
+                    _onFrameAvailabilityChanged?.Invoke(true);
+                    _diagnosticLog?.Invoke(
+                        $"first frame presented: {frame.Width}x{frame.Height}");
+                }
             }
         }
-        catch
+        catch (Exception ex)
         {
             // A transient bitmap failure must not stop later video frames.
+            if (Interlocked.Exchange(ref _renderErrorReported, 1) == 0)
+            {
+                _diagnosticLog?.Invoke(
+                    $"frame presentation failed: {ex.Message}");
+            }
         }
         finally
         {
@@ -131,6 +163,25 @@ internal sealed class VideoFramePresenter : IRtcVideoSink, IDisposable
                 if (_pendingFrame != null)
                     QueueRender();
             }
+        }
+    }
+
+    private static void EnsureOpaqueBgra(
+        byte[] data,
+        int width,
+        int height,
+        int stride)
+    {
+        if (data.Length < 4 || data[3] == byte.MaxValue)
+            return;
+
+        var rowBytes = checked(width * 4);
+        for (var row = 0; row < height; row++)
+        {
+            var rowStart = checked(row * stride);
+            var rowEnd = checked(rowStart + rowBytes);
+            for (var alpha = rowStart + 3; alpha < rowEnd; alpha += 4)
+                data[alpha] = byte.MaxValue;
         }
     }
 

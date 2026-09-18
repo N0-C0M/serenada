@@ -109,7 +109,14 @@ internal sealed class MrPeerConnection : IRtcPeerConnection
 
     internal async Task InitializeAsync(PeerConnectionConfiguration config)
     {
-        _pc = new PeerConnection();
+        _pc = new PeerConnection
+        {
+            // VP8 is the common baseline implemented consistently by the
+            // current Android, iOS, Web, and legacy MR-WebRTC clients. Leaving
+            // this empty can negotiate a device H.264 profile that the remote
+            // phone encodes but this older Windows decoder cannot consume.
+            PreferredVideoCodec = "VP8",
+        };
 
         _pc.Connected += () =>
         {
@@ -314,8 +321,23 @@ internal sealed class MrPeerConnection : IRtcPeerConnection
     {
         if (_closed) return;
         _closed = true;
-        _pc?.Close();
-        _pc?.Dispose();
+        var pc = _pc;
+        if (pc != null)
+        {
+            // MR-WebRTC local tracks remain associated with their previous
+            // native transceivers even after PeerConnection.Close(). Explicitly
+            // detach them so a recovery/rejoin slot can reuse the live camera
+            // and microphone tracks with its new peer connection.
+            foreach (var transceiver in pc.Transceivers)
+            {
+                try { transceiver.LocalAudioTrack = null; }
+                catch { /* The transceiver may already be closed. */ }
+                try { transceiver.LocalVideoTrack = null; }
+                catch { /* The transceiver may already be closed. */ }
+            }
+            pc.Close();
+            pc.Dispose();
+        }
         _pc = null;
         _remoteVideoTracks.Clear();
         _remoteAudioTracks.Clear();

@@ -20,4 +20,11 @@ public sealed record SerenadaCallFlowConfig
 
     /// <summary>Accent color for buttons and indicators. Defaults to <c>"#2563EB"</c> (blue).</summary>
     public string AccentColor { get; init; } = "#2563EB";
+
+    /// <summary>
+    /// Optional sink for call-UI diagnostics such as first-frame receipt and
+    /// presentation. Rendering errors are reported here instead of affecting
+    /// the call.
+    /// </summary>
+    public Action<string>? DiagnosticLog { get; init; }
 }
