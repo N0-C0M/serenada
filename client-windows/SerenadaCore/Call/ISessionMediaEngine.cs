@@ -179,6 +179,12 @@ internal interface IPeerConnectionSlot : IDisposable
     /// <summary>Set the active offer identifier before applying SDP.</summary>
     void SetNegotiationId(string negotiationId);
 
-    /// <summary>Replace the local camera track without recreating the slot.</summary>
-    void SetLocalVideoTrack(IRtcVideoTrack? track);
+    /// <summary>Replace the local camera source without recreating the slot.</summary>
+    void SetLocalVideoSource(IRtcVideoSource? source, bool enabled);
+
+    /// <summary>Enable or disable this slot's local video track.</summary>
+    void SetLocalVideoEnabled(bool enabled);
+
+    /// <summary>Enable or disable this slot's local audio track.</summary>
+    void SetLocalAudioEnabled(bool enabled);
 }

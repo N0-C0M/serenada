@@ -17,9 +17,14 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
     private readonly bool _enableIndependentContent;
     private readonly bool _videoMediaEnabled;
     private readonly bool _isOfferOwner;
-    private readonly IRtcAudioTrack? _localAudioTrack;
+    private readonly IRtcPeerConnectionFactory _factory;
+    private readonly IRtcAudioSource? _localAudioSource;
+    private IRtcAudioTrack? _localAudioTrack;
+    private IRtcVideoSource? _localVideoSource;
     private IRtcVideoTrack? _localVideoTrack;
     private readonly IRtcVideoTrack? _localContentVideoTrack;
+    private bool _localAudioEnabled;
+    private bool _localVideoEnabled;
     private readonly Task _initializationTask;
 
     private readonly List<RtcIceCandidate> _pendingIceCandidates = [];
@@ -72,8 +77,10 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         string remoteCid,
         bool supportsIndependentContentVideo,
         IPeerConnectionSlotCallbacks callbacks,
-        IRtcAudioTrack? localAudioTrack,
-        IRtcVideoTrack? localVideoTrack,
+        IRtcAudioSource? localAudioSource,
+        IRtcVideoSource? localVideoSource,
+        bool localAudioEnabled,
+        bool localVideoEnabled,
         IRtcVideoTrack? localContentVideoTrack,
         bool videoMediaEnabled,
         bool isOfferOwner,
@@ -84,10 +91,13 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         _enableIndependentContent = supportsIndependentContentVideo;
         _callbacks = callbacks;
         _logger = logger;
+        _factory = factory;
+        _localAudioSource = localAudioSource;
+        _localVideoSource = localVideoSource;
+        _localAudioEnabled = localAudioEnabled;
+        _localVideoEnabled = localVideoEnabled;
         _videoMediaEnabled = videoMediaEnabled;
         _isOfferOwner = isOfferOwner;
-        _localAudioTrack = localAudioTrack;
-        _localVideoTrack = localVideoTrack;
         _localContentVideoTrack = localContentVideoTrack;
         _initializationTask = InitializeAsync(
             factory,
@@ -159,6 +169,7 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         }
         _remoteContentTrack = null;
         _remoteAudioTrack = null;
+        DisposeLocalTracks();
         _pc?.Close();
     }
 
@@ -188,10 +199,25 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         _currentNegotiationId = negotiationId;
     }
 
-    public void SetLocalVideoTrack(IRtcVideoTrack? track)
+    public void SetLocalVideoSource(IRtcVideoSource? source, bool enabled)
     {
-        _localVideoTrack = track;
-        _cameraSender?.SetVideoTrack(track);
+        _localVideoSource = source;
+        _localVideoEnabled = enabled;
+        ReplaceLocalVideoTrack();
+    }
+
+    public void SetLocalAudioEnabled(bool enabled)
+    {
+        _localAudioEnabled = enabled;
+        if (_localAudioTrack != null)
+            _localAudioTrack.Enabled = enabled;
+    }
+
+    public void SetLocalVideoEnabled(bool enabled)
+    {
+        _localVideoEnabled = enabled;
+        if (_localVideoTrack != null)
+            _localVideoTrack.Enabled = enabled;
     }
 
     // ── IRtcPeerConnectionObserver ───────────────────────────
@@ -294,6 +320,7 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
         }
 
         _pc = pc;
+        CreateLocalTracks();
         if (!_isOfferOwner)
             return;
 
@@ -370,6 +397,73 @@ internal class PeerConnectionSlot : IPeerConnectionSlot, IRtcPeerConnectionObser
                 MaxFramerate = 5,
             });
         }
+    }
+
+    private void CreateLocalTracks()
+    {
+        if (_localAudioSource != null)
+        {
+            try
+            {
+                _localAudioTrack = _factory.CreateAudioTrack(
+                    $"local_audio_{RemoteCid}", _localAudioSource);
+                _localAudioTrack.Enabled = _localAudioEnabled;
+            }
+            catch (Exception ex)
+            {
+                Log(SerenadaLogLevel.Warning, "Slot",
+                    $"Could not create local audio track for {RemoteCid}: {ex.Message}");
+            }
+        }
+
+        ReplaceLocalVideoTrack();
+    }
+
+    private void ReplaceLocalVideoTrack()
+    {
+        if (!_videoMediaEnabled)
+            return;
+
+        if (_localVideoSource == null)
+        {
+            _cameraSender?.SetVideoTrack(null);
+            DisposeTrack(_localVideoTrack);
+            _localVideoTrack = null;
+            return;
+        }
+
+        IRtcVideoTrack newTrack;
+        try
+        {
+            newTrack = _factory.CreateVideoTrack(
+                $"local_video_{RemoteCid}", _localVideoSource);
+            newTrack.Enabled = _localVideoEnabled;
+        }
+        catch (Exception ex)
+        {
+            Log(SerenadaLogLevel.Warning, "Slot",
+                $"Could not create local video track for {RemoteCid}: {ex.Message}");
+            return;
+        }
+
+        var previousTrack = _localVideoTrack;
+        _localVideoTrack = newTrack;
+        _cameraSender?.SetVideoTrack(newTrack);
+        DisposeTrack(previousTrack);
+    }
+
+    private void DisposeLocalTracks()
+    {
+        DisposeTrack(_localAudioTrack);
+        DisposeTrack(_localVideoTrack);
+        _localAudioTrack = null;
+        _localVideoTrack = null;
+    }
+
+    private static void DisposeTrack(object? track)
+    {
+        if (track is IDisposable disposable)
+            disposable.Dispose();
     }
 
     private async Task<IRtcPeerConnection> GetPeerConnectionAsync()

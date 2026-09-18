@@ -21,10 +21,12 @@ internal class WebRtcEngine : ISessionMediaEngine
     private RtcConfiguration _rtcConfiguration = new();
     private bool _localMediaStarted;
 
-    // Local media — audio via MR-WebRTC, video via LocalMediaManager
+    // Local media sources are shared; each peer slot creates its own native
+    // track because MR-WebRTC binds tracks to a single PeerConnection.
     private IRtcAudioSource? _localAudioSource;
-    private IRtcAudioTrack? _localAudioTrack;
     private IRtcVideoTrack? _localVideoTrack;
+    private bool _localAudioEnabled;
+    private bool _localVideoEnabled;
 
     // Independent content video
     private IRtcVideoTrack? _localContentVideoTrack;
@@ -68,12 +70,12 @@ internal class WebRtcEngine : ISessionMediaEngine
     {
         if (_localMediaStarted) return;
         _factory ??= CreateFactory();
+        _localAudioEnabled = _config.DefaultAudioEnabled;
+        _localVideoEnabled = _config.DefaultVideoEnabled;
 
         try
         {
             _localAudioSource = await _factory.CreateAudioSourceAsync();
-            _localAudioTrack = _factory.CreateAudioTrack("local_audio", _localAudioSource);
-            _localAudioTrack.Enabled = _config.DefaultAudioEnabled;
         }
         catch (Exception ex)
         {
@@ -113,13 +115,11 @@ internal class WebRtcEngine : ISessionMediaEngine
         _slots.Clear();
 
         DisposeTrack(_localVideoTrack);
-        DisposeTrack(_localAudioTrack);
         if (_localAudioSource is IDisposable audioSource)
             audioSource.Dispose();
         DisposeTrack(_localContentVideoTrack);
 
         _localVideoTrack = null;
-        _localAudioTrack = null;
         _localAudioSource = null;
         _localContentVideoTrack = null;
         LocalVideoTrackChanged?.Invoke(null);
@@ -137,16 +137,20 @@ internal class WebRtcEngine : ISessionMediaEngine
 
     public void SetAudioEnabled(bool enabled)
     {
+        _localAudioEnabled = enabled;
         _localMedia.SetAudioEnabled(enabled);
-        if (_localAudioTrack != null)
-            _localAudioTrack.Enabled = enabled;
+        foreach (var slot in _slots)
+            slot.SetLocalAudioEnabled(enabled);
     }
 
     public void SetVideoEnabled(bool enabled)
     {
+        _localVideoEnabled = enabled;
         _localMedia.SetVideoEnabled(enabled);
         if (_localVideoTrack != null)
             _localVideoTrack.Enabled = enabled;
+        foreach (var slot in _slots)
+            slot.SetLocalVideoEnabled(enabled);
     }
 
     public async Task FlipCameraAsync()
@@ -193,8 +197,9 @@ internal class WebRtcEngine : ISessionMediaEngine
 
         _localVideoTrack = newTrack;
         _currentCameraMode = _localMedia.CurrentMode;
+        var source = new MrDeviceVideoSource(newSource);
         foreach (var slot in _slots)
-            slot.SetLocalVideoTrack(_localVideoTrack);
+            slot.SetLocalVideoSource(source, wasEnabled);
 
         LocalVideoTrackChanged?.Invoke(_localVideoTrack);
         DisposeTrack(previousTrack);
@@ -250,8 +255,10 @@ internal class WebRtcEngine : ISessionMediaEngine
             supportsIndependentContentVideo: participant.SupportsIndependentContentVideo
                 && SupportsIndependentContentVideo,
             callbacks: callbacks,
-            localAudioTrack: _localAudioTrack,
-            localVideoTrack: _localVideoTrack,
+            localAudioSource: _localAudioSource,
+            localVideoSource: LocalVideoSource,
+            localAudioEnabled: _localAudioEnabled,
+            localVideoEnabled: _localVideoEnabled,
             localContentVideoTrack: _localContentVideoTrack,
             videoMediaEnabled: _config.VideoMediaEnabled,
             isOfferOwner: isOfferOwner,
