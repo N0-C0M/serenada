@@ -13,6 +13,7 @@ internal sealed record AppSettings
     public string ServerHost { get; init; } = HostUtilities.DefaultHost;
     public bool StartWithMicrophone { get; init; } = true;
     public bool StartWithCamera { get; init; } = true;
+    public bool FloatingBubbleEnabled { get; init; }
 
     public static AppSettings Load()
     {
