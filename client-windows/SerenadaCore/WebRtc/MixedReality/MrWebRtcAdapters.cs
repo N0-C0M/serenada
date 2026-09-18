@@ -586,7 +586,11 @@ internal sealed class MrLocalAudioTrack : IRtcAudioTrack, IDisposable
 internal sealed class MrRemoteAudioTrack : IRtcAudioTrack
 {
     public RemoteAudioTrack NativeTrack { get; }
-    public MrRemoteAudioTrack(RemoteAudioTrack track) => NativeTrack = track;
+    public MrRemoteAudioTrack(RemoteAudioTrack track)
+    {
+        NativeTrack = track;
+        NativeTrack.OutputToDevice(true);
+    }
     public string Id => NativeTrack.Name;
     public bool Enabled => NativeTrack.Enabled;
     bool IRtcAudioTrack.Enabled { get => NativeTrack.Enabled; set { /* read-only */ } }
