@@ -15,8 +15,10 @@ Supported in the current build:
 - TURN credential and reconnect-token refresh;
 - automatic transport and per-peer media recovery;
 - non-blocking native media and peer-connection startup;
-- persistent display-name, microphone, camera, and server-host preferences;
-- named saved rooms with join, copy-link, and remove actions.
+- persistent display-name, microphone, camera, server-host, and floating-button preferences;
+- named saved rooms with a compact card layout, last-used metadata, join, copy-link, and remove actions;
+- an optional always-on-top floating Serenada button for quickly returning to the app;
+- rounded Windows 11 window corners with a custom integrated title bar.
 
 The Settings screen also links directly to the Windows microphone and camera
 privacy pages. The server picker includes `serenada.app`, `serenada-app.ru`,
@@ -42,16 +44,38 @@ dotnet build SerenadaWindows.sln -c Debug -p:Platform=x64
 .\SerenadaApp\bin\x64\Debug\net9.0-windows10.0.26100.0\win-x64\SerenadaApp.exe
 ```
 
-## Publish a launchable executable
+## Publish portable files
 
-From the repository root, run:
+From the repository root:
 
 ```powershell
 .\client-windows\publish.ps1
 ```
 
-The self-contained executable is created at
-`client-windows\artifacts\SerenadaApp-win-x64\SerenadaApp.exe`. Copy the whole
-`SerenadaApp-win-x64` folder to another 64-bit Windows computer, then start the
-`.exe`; no .NET installation is required. To build the 32-bit variant, pass
-`-Architecture x86`. The current native WebRTC package supports x64 and x86.
+The self-contained application files are created at
+`client-windows\artifacts\SerenadaApp-win-x64\`. No separate .NET runtime is
+required, but the entire publish folder must stay together because the native
+WebRTC and Windows App SDK files are part of the application.
+
+## Build the single-EXE installer
+
+Install Inno Setup 6 once on the build machine, then run:
+
+```powershell
+.\client-windows\build-installer.ps1
+```
+
+The result is one distributable file:
+
+```text
+client-windows\artifacts\installer\Serenada-Setup-x64.exe
+```
+
+The installer is per-user by default, installs Serenada under
+`%LOCALAPPDATA%\Programs\Serenada`, creates a Start menu shortcut, offers an
+optional desktop shortcut, and can launch Serenada immediately after setup.
+
+GitHub Actions also builds this installer automatically for Windows-client pull
+requests and pushes to `main`; download the `Serenada-Windows-x64` artifact
+from the workflow run to get the single EXE without installing build tools
+locally.
