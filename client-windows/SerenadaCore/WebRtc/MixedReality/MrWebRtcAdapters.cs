@@ -109,14 +109,10 @@ internal sealed class MrPeerConnection : IRtcPeerConnection
 
     internal async Task InitializeAsync(PeerConnectionConfiguration config)
     {
-        _pc = new PeerConnection
-        {
-            // VP8 is the common baseline implemented consistently by the
-            // current Android, iOS, Web, and legacy MR-WebRTC clients. Leaving
-            // this empty can negotiate a device H.264 profile that the remote
-            // phone encodes but this older Windows decoder cannot consume.
-            PreferredVideoCodec = "VP8",
-        };
+        // Let MR-WebRTC negotiate the first mutually supported video codec.
+        // A forced VP8 preference breaks inbound video with peers whose offer
+        // uses another supported codec, even though audio still connects.
+        _pc = new PeerConnection();
 
         _pc.Connected += () =>
         {
