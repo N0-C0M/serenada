@@ -1,3 +1,4 @@
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -5,7 +6,9 @@ using Serenada.CallUI;
 using Serenada.Core;
 using Serenada.Core.Models;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Graphics;
 
 namespace SerenadaApp;
 
@@ -14,20 +17,34 @@ namespace SerenadaApp;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private const int SwRestore = 9;
+
     private SerenadaCore _serenada;
     private AppSettings _settings;
     private readonly SavedRoomStore _savedRoomStore = new();
     private SerenadaSession? _currentSession;
+    private FloatingBubbleWindow? _floatingBubble;
 
     public MainWindow()
     {
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
-        Closed += (_, _) => EndActiveSession();
+        SetTitleBar(AppTitleBar);
+
+        ConfigureWindowChrome();
+
+        Closed += (_, _) =>
+        {
+            _floatingBubble?.Close();
+            _floatingBubble = null;
+            EndActiveSession();
+        };
 
         _settings = NormalizeSettings(AppSettings.Load());
         _serenada = CreateCore(_settings);
         RenderSavedRooms();
+
+        DispatcherQueue.TryEnqueue(ApplyFloatingBubbleSetting);
 
         var recovery = _serenada.GetRecoverableSession();
         if (recovery != null)
@@ -35,6 +52,25 @@ public sealed partial class MainWindow : Window
             StatusLabel.Text = "Rejoining your active call...";
             JoinCall(recovery.RoomId, recovery);
         }
+    }
+
+    private void ConfigureWindowChrome()
+    {
+        try
+        {
+            AppWindow.Resize(new SizeInt32(1080, 760));
+            AppWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            AppWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+            AppWindow.TitleBar.ButtonForegroundColor = Microsoft.UI.Colors.White;
+            AppWindow.TitleBar.ButtonInactiveForegroundColor =
+                Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x7F, 0x8D, 0xA3);
+        }
+        catch
+        {
+            // Window sizing and title bar colors are cosmetic.
+        }
+
+        Activated += (_, _) => WindowChrome.PreferRoundedCorners(this);
     }
 
     private void OnJoinClick(object sender, RoutedEventArgs e)
@@ -92,6 +128,7 @@ public sealed partial class MainWindow : Window
         ServerHostInput.Text = _settings.ServerHost;
         StartWithMicrophoneToggle.IsOn = _settings.StartWithMicrophone;
         StartWithCameraToggle.IsOn = _settings.StartWithCamera;
+        FloatingBubbleToggle.IsOn = _settings.FloatingBubbleEnabled;
         SettingsStatusLabel.Text = string.Empty;
         HomePanel.Visibility = Visibility.Collapsed;
         SettingsPanel.Visibility = Visibility.Visible;
@@ -131,10 +168,13 @@ public sealed partial class MainWindow : Window
                 ServerHost = serverHost,
                 StartWithMicrophone = StartWithMicrophoneToggle.IsOn,
                 StartWithCamera = StartWithCameraToggle.IsOn,
+                FloatingBubbleEnabled = FloatingBubbleToggle.IsOn,
             };
             settings.Save();
             _settings = settings;
             _serenada = CreateCore(_settings);
+            ApplyFloatingBubbleSetting();
+
             SettingsPanel.Visibility = Visibility.Collapsed;
             HomePanel.Visibility = Visibility.Visible;
             StatusLabel.Text =
@@ -148,6 +188,38 @@ public sealed partial class MainWindow : Window
         {
             SettingsSaveButton.IsEnabled = true;
         }
+    }
+
+    private void ApplyFloatingBubbleSetting()
+    {
+        if (!_settings.FloatingBubbleEnabled)
+        {
+            _floatingBubble?.Close();
+            _floatingBubble = null;
+            return;
+        }
+
+        _floatingBubble ??= new FloatingBubbleWindow(ActivateMainWindow);
+        _floatingBubble.ShowBubble();
+
+        // Opening the helper window should not take the user away from Serenada.
+        Activate();
+    }
+
+    private void ActivateMainWindow()
+    {
+        try
+        {
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            _ = ShowWindow(hwnd, SwRestore);
+            _ = SetForegroundWindow(hwnd);
+        }
+        catch
+        {
+            // Activate below is still enough on systems where the Win32 call fails.
+        }
+
+        Activate();
     }
 
     private async void OnMicrophonePrivacyClick(object sender, RoutedEventArgs e)
@@ -258,6 +330,7 @@ public sealed partial class MainWindow : Window
                 Host = _settings.ServerHost,
                 CreatedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
             };
+
             _savedRoomStore.Save(room);
             RenderSavedRooms();
             var inviteLink = HostUtilities.BuildSavedRoomInviteLink(room);
@@ -412,41 +485,102 @@ public sealed partial class MainWindow : Window
     {
         SavedRoomsList.Children.Clear();
         var rooms = _savedRoomStore.Load();
+
         SavedRoomsEmptyText.Visibility = rooms.Count == 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+        SavedRoomsCountText.Text = rooms.Count == 1
+            ? "1 room"
+            : $"{rooms.Count} rooms";
 
         foreach (var room in rooms)
         {
-            var details = new StackPanel { Spacing = 2 };
+            var avatar = new Border
+            {
+                Width = 42,
+                Height = 42,
+                CornerRadius = new CornerRadius(14),
+                Background = Brush(0xFF, 0x14, 0x21, 0x3A),
+                VerticalAlignment = VerticalAlignment.Center,
+                Child = new TextBlock
+                {
+                    Text = room.Name[..1].ToUpperInvariant(),
+                    FontSize = 16,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Foreground = Brush(0xFF, 0xBF, 0xDB, 0xFE),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+
+            var details = new StackPanel
+            {
+                Spacing = 3,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
             details.Children.Add(new TextBlock
             {
                 Text = room.Name,
                 Foreground = Brush(0xFF, 0xF8, 0xFA, 0xFC),
+                FontSize = 14,
                 FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
             details.Children.Add(new TextBlock
             {
-                Text = room.Host,
-                Foreground = Brush(0xFF, 0xCB, 0xD5, 0xE1),
-                FontSize = 12,
+                Text = $"{room.Host}  •  {FormatRoomActivity(room)}",
+                Foreground = Brush(0xFF, 0x7F, 0x91, 0xAA),
+                FontSize = 11,
                 TextTrimming = TextTrimming.CharacterEllipsis,
             });
 
-            var joinButton = RoomActionButton("Join", "#2563EB");
+            var joinButton = new Button
+            {
+                Content = "Join",
+                MinWidth = 68,
+                Height = 36,
+                Background = Brush(0xFF, 0x1D, 0x4E, 0xD8),
+                Foreground = Brush(0xFF, 0xFF, 0xFF, 0xFF),
+                BorderThickness = new Thickness(0),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14, 7, 14, 7),
+            };
             joinButton.Click += (_, _) => JoinRoom(
                 new RoomTarget(room.RoomId, room.Host));
-            var copyButton = RoomActionButton("Copy", "#334155");
-            copyButton.Click += (_, _) =>
+
+            var moreButton = new Button
+            {
+                Content = "•••",
+                Width = 38,
+                Height = 36,
+                Padding = new Thickness(0),
+                Background = Brush(0xFF, 0x17, 0x22, 0x35),
+                Foreground = Brush(0xFF, 0xC7, 0xD2, 0xE1),
+                BorderBrush = Brush(0xFF, 0x2B, 0x3A, 0x51),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(10),
+                FontSize = 14,
+            };
+            ToolTipService.SetToolTip(moreButton, "Room actions");
+
+            var menu = new MenuFlyout();
+            var copyItem = new MenuFlyoutItem
+            {
+                Text = "Copy save link",
+            };
+            copyItem.Click += (_, _) =>
             {
                 StatusLabel.Text = TryCopyText(
                     HostUtilities.BuildSavedRoomInviteLink(room))
                         ? $"Save link for “{room.Name}” copied."
                         : "The clipboard is unavailable.";
             };
-            var removeButton = RoomActionButton("Remove", "#7F1D1D");
-            removeButton.Click += (_, _) =>
+
+            var removeItem = new MenuFlyoutItem
+            {
+                Text = "Remove room",
+            };
+            removeItem.Click += (_, _) =>
             {
                 try
                 {
@@ -461,54 +595,75 @@ public sealed partial class MainWindow : Window
                 }
             };
 
+            menu.Items.Add(copyItem);
+            menu.Items.Add(new MenuFlyoutSeparator());
+            menu.Items.Add(removeItem);
+            moreButton.Flyout = menu;
+
             var actions = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
-                Spacing = 6,
-                HorizontalAlignment = HorizontalAlignment.Right,
+                Spacing = 7,
+                VerticalAlignment = VerticalAlignment.Center,
             };
             actions.Children.Add(joinButton);
-            actions.Children.Add(copyButton);
-            actions.Children.Add(removeButton);
+            actions.Children.Add(moreButton);
 
-            var grid = new Grid { ColumnSpacing = 12 };
+            var grid = new Grid
+            {
+                ColumnSpacing = 12,
+            };
+            grid.ColumnDefinitions.Add(new ColumnDefinition
+            {
+                Width = GridLength.Auto,
+            });
             grid.ColumnDefinitions.Add(new ColumnDefinition());
             grid.ColumnDefinitions.Add(new ColumnDefinition
             {
                 Width = GridLength.Auto,
             });
-            Grid.SetColumn(actions, 1);
+
+            Grid.SetColumn(details, 1);
+            Grid.SetColumn(actions, 2);
+            grid.Children.Add(avatar);
             grid.Children.Add(details);
             grid.Children.Add(actions);
 
             SavedRoomsList.Children.Add(new Border
             {
-                Background = Brush(0xFF, 0x1E, 0x29, 0x3B),
-                BorderBrush = Brush(0xFF, 0x64, 0x74, 0x8B),
+                Background = Brush(0xFF, 0x10, 0x19, 0x2A),
+                BorderBrush = Brush(0xFF, 0x20, 0x2E, 0x45),
                 BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(8),
+                CornerRadius = new CornerRadius(13),
                 Padding = new Thickness(12),
                 Child = grid,
             });
         }
     }
 
-    private static Button RoomActionButton(string text, string background)
+    private static string FormatRoomActivity(SavedRoom room)
     {
-        return new Button
+        if (room.LastJoinedAt is not > 0)
+            return "Not joined yet";
+
+        try
         {
-            Content = text,
-            Background = new SolidColorBrush(
-                Microsoft.UI.ColorHelper.FromArgb(
-                    0xFF,
-                    Convert.ToByte(background.Substring(1, 2), 16),
-                    Convert.ToByte(background.Substring(3, 2), 16),
-                    Convert.ToByte(background.Substring(5, 2), 16))),
-            Foreground = Brush(0xFF, 0xF8, 0xFA, 0xFC),
-            BorderBrush = Brush(0xFF, 0x94, 0xA3, 0xB8),
-            CornerRadius = new CornerRadius(7),
-            Padding = new Thickness(10, 7, 10, 7),
-        };
+            var joined = DateTimeOffset
+                .FromUnixTimeMilliseconds(room.LastJoinedAt.Value)
+                .ToLocalTime();
+            var now = DateTimeOffset.Now;
+
+            if (joined.Date == now.Date)
+                return $"Used today {joined:HH:mm}";
+            if (joined.Date == now.Date.AddDays(-1))
+                return $"Used yesterday {joined:HH:mm}";
+
+            return $"Used {joined:MMM d}";
+        }
+        catch
+        {
+            return "Previously used";
+        }
     }
 
     private static SolidColorBrush Brush(byte a, byte r, byte g, byte b)
@@ -571,4 +726,12 @@ public sealed partial class MainWindow : Window
                 $"Could not open the privacy settings: {ex.Message}";
         }
     }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ShowWindow(nint hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint hWnd);
 }

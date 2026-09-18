@@ -13,269 +13,429 @@
     </Window.SystemBackdrop>
 
     <Grid x:Name="RootGrid"
-          Background="#0B1220"
+          Background="#050A12"
           RequestedTheme="Dark">
-        <!-- Home screen: room creation and join -->
-        <ScrollViewer x:Name="HomePanel"
-                      Width="520"
-                      HorizontalAlignment="Center"
-                      VerticalAlignment="Stretch"
-                      VerticalScrollBarVisibility="Auto"
-                      HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Spacing="16"
-                        Margin="24,32">
-                <TextBlock Text="Serenada"
-                           FontSize="32"
-                           FontWeight="Bold"
-                           HorizontalAlignment="Center"
-                           Foreground="#F8FAFC" />
-                <TextBlock Text="Privacy-first video calling"
-                           FontSize="14"
-                           HorizontalAlignment="Center"
-                           Foreground="#CBD5E1"
-                           Margin="0,0,0,16" />
+        <Border x:Name="WindowSurface"
+                Margin="1"
+                CornerRadius="18"
+                Background="#0A1020"
+                BorderBrush="#1F2A3D"
+                BorderThickness="1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="46" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-                <TextBox x:Name="RoomUrlInput"
-                         PlaceholderText="Paste a call link or room ID..."
-                         PlaceholderForeground="#94A3B8"
-                         Background="#111827"
-                         Foreground="#F8FAFC"
-                         BorderBrush="#64748B"
-                         CornerRadius="8"
-                         Padding="12,10" />
-
-                <Button x:Name="JoinButton"
-                        Content="Join Call"
-                        Background="#2563EB"
-                        Foreground="White"
-                        CornerRadius="8"
-                        Padding="24,12"
-                        HorizontalAlignment="Stretch"
-                        Click="OnJoinClick" />
-
-                <Button x:Name="CreateRoomButton"
-                        Content="Create New Room"
-                        Background="#334155"
-                        Foreground="#F8FAFC"
-                        BorderBrush="#64748B"
-                        CornerRadius="8"
-                        Padding="24,12"
-                        HorizontalAlignment="Stretch"
-                        Click="OnCreateRoomClick" />
-
-                <Border Background="#111827"
-                        BorderBrush="#475569"
-                        BorderThickness="1"
-                        CornerRadius="12"
-                        Padding="16"
-                        Margin="0,8,0,0">
-                    <StackPanel Spacing="12">
-                        <TextBlock Text="Saved rooms"
-                                   Foreground="#F8FAFC"
-                                   FontSize="18"
-                                   FontWeight="SemiBold" />
-                        <TextBlock Text="Keep named rooms and share links that save the room on another device."
-                                   Foreground="#CBD5E1"
-                                   TextWrapping="Wrap" />
-                        <TextBox x:Name="SavedRoomNameInput"
-                                 PlaceholderText="Room name"
-                                 PlaceholderForeground="#94A3B8"
-                                 MaxLength="120"
-                                 Background="#0B1220"
-                                 Foreground="#F8FAFC"
-                                 BorderBrush="#64748B"
-                                 CornerRadius="8"
-                                 Padding="12,9" />
-                        <Grid ColumnSpacing="10">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition />
-                                <ColumnDefinition />
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0"
-                                    Content="Save pasted room"
-                                    Background="#334155"
-                                    Foreground="#F8FAFC"
-                                    BorderBrush="#64748B"
-                                    CornerRadius="8"
-                                    Padding="12,9"
-                                    HorizontalAlignment="Stretch"
-                                    Click="OnSaveRoomLinkClick" />
-                            <Button x:Name="CreateSavedRoomButton"
-                                    Grid.Column="1"
-                                    Content="Create named room"
-                                    Background="#2563EB"
-                                    Foreground="White"
-                                    CornerRadius="8"
-                                    Padding="12,9"
-                                    HorizontalAlignment="Stretch"
-                                    Click="OnCreateSavedRoomClick" />
-                        </Grid>
-                        <TextBlock x:Name="SavedRoomsEmptyText"
-                                   Text="No saved rooms yet."
-                                   Foreground="#CBD5E1"
-                                   HorizontalAlignment="Center"
-                                   Margin="0,8" />
-                        <StackPanel x:Name="SavedRoomsList"
-                                    Spacing="8" />
+                <Grid x:Name="AppTitleBar"
+                      Grid.Row="0"
+                      Padding="18,0,160,0"
+                      Background="Transparent">
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="10"
+                                VerticalAlignment="Center">
+                        <Border Width="26"
+                                Height="26"
+                                CornerRadius="9"
+                                Background="#2563EB">
+                            <TextBlock Text="S"
+                                       HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       FontWeight="Bold"
+                                       Foreground="White" />
+                        </Border>
+                        <TextBlock Text="Serenada"
+                                   VerticalAlignment="Center"
+                                   FontSize="14"
+                                   FontWeight="SemiBold"
+                                   Foreground="#F8FAFC" />
                     </StackPanel>
-                </Border>
-
-                <Button Content="Settings"
-                        Background="#111827"
-                        Foreground="#F8FAFC"
-                        BorderBrush="#64748B"
-                        CornerRadius="8"
-                        Padding="24,10"
-                        HorizontalAlignment="Stretch"
-                        Click="OnSettingsClick" />
-
-                <TextBlock x:Name="StatusLabel"
-                           Text=""
-                           FontSize="13"
-                           Foreground="#E2E8F0"
-                           HorizontalAlignment="Center"
-                           TextAlignment="Center"
-                           TextWrapping="Wrap" />
-            </StackPanel>
-        </ScrollViewer>
-
-        <Border x:Name="SettingsPanel"
-                Visibility="Collapsed"
-                Width="440"
-                Padding="28"
-                CornerRadius="16"
-                Background="#111827"
-                BorderBrush="#64748B"
-                BorderThickness="1"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center">
-            <ScrollViewer MaxHeight="680"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled">
-              <StackPanel Spacing="20">
-                <StackPanel Spacing="4">
-                    <TextBlock Text="Settings"
-                               Foreground="#F8FAFC"
-                               FontSize="26"
-                               FontWeight="SemiBold" />
-                    <TextBlock Text="These preferences apply when you join the next call."
-                               Foreground="#CBD5E1"
-                               TextWrapping="Wrap" />
-                </StackPanel>
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Server host"
-                               Foreground="#F8FAFC" />
-                    <ComboBox x:Name="ServerHostInput"
-                              IsEditable="True"
-                              PlaceholderText="Server hostname"
-                              Background="#0B1220"
-                              Foreground="#F8FAFC"
-                              BorderBrush="#64748B"
-                              HorizontalAlignment="Stretch">
-                        <ComboBoxItem Content="serenada.app" />
-                        <ComboBoxItem Content="serenada-app.ru" />
-                    </ComboBox>
-                    <TextBlock Text="Choose Global, Russia, or type a custom Serenada host."
-                               Foreground="#CBD5E1"
-                               FontSize="12"
-                               TextWrapping="Wrap" />
-                </StackPanel>
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Display name"
-                               Foreground="#F8FAFC" />
-                    <TextBox x:Name="DisplayNameInput"
-                             PlaceholderText="Your name"
-                             PlaceholderForeground="#94A3B8"
-                             MaxLength="80"
-                             Background="#0B1220"
-                             Foreground="#F8FAFC"
-                             BorderBrush="#64748B"
-                             CornerRadius="8"
-                             Padding="12,10" />
-                </StackPanel>
-
-                <ToggleSwitch x:Name="StartWithMicrophoneToggle"
-                              Header="Microphone on when joining"
-                              Foreground="#F8FAFC"
-                              IsOn="True" />
-
-                <ToggleSwitch x:Name="StartWithCameraToggle"
-                              Header="Camera on when joining"
-                              Foreground="#F8FAFC"
-                              IsOn="True" />
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Windows device permissions"
-                               Foreground="#CBD5E1" />
-                    <Grid ColumnSpacing="12">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition />
-                            <ColumnDefinition />
-                        </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0"
-                                Content="Microphone"
-                                Background="#0B1220"
-                                Foreground="#F8FAFC"
-                                BorderBrush="#64748B"
-                                CornerRadius="8"
-                                Padding="12,9"
-                                HorizontalAlignment="Stretch"
-                                Click="OnMicrophonePrivacyClick" />
-                        <Button Grid.Column="1"
-                                Content="Camera"
-                                Background="#0B1220"
-                                Foreground="#F8FAFC"
-                                BorderBrush="#64748B"
-                                CornerRadius="8"
-                                Padding="12,9"
-                                HorizontalAlignment="Stretch"
-                                Click="OnCameraPrivacyClick" />
-                    </Grid>
-                </StackPanel>
-
-                <Button Content="Open diagnostic log folder"
-                        Background="#0B1220"
-                        Foreground="#F8FAFC"
-                        BorderBrush="#64748B"
-                        CornerRadius="8"
-                        Padding="12,9"
-                        HorizontalAlignment="Stretch"
-                        Click="OnOpenLogsClick" />
-
-                <TextBlock x:Name="SettingsStatusLabel"
-                           Foreground="#FCA5A5"
-                           TextWrapping="Wrap" />
-
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition />
-                        <ColumnDefinition />
-                    </Grid.ColumnDefinitions>
-                    <Button Grid.Column="0"
-                            Content="Cancel"
-                            Background="#334155"
-                            Foreground="#F8FAFC"
-                            CornerRadius="8"
-                            Padding="20,11"
-                            HorizontalAlignment="Stretch"
-                            Click="OnSettingsCancelClick" />
-                    <Button x:Name="SettingsSaveButton"
-                            Grid.Column="1"
-                            Content="Save"
-                            Background="#2563EB"
-                            Foreground="White"
-                            CornerRadius="8"
-                            Padding="20,11"
-                            HorizontalAlignment="Stretch"
-                            Click="OnSettingsSaveClick" />
                 </Grid>
-              </StackPanel>
-            </ScrollViewer>
-        </Border>
 
-        <!-- Call screen (hidden until a call is active) -->
-        <Grid x:Name="CallPanel" Visibility="Collapsed" />
+                <Grid Grid.Row="1">
+                    <ScrollViewer x:Name="HomePanel"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch"
+                                  VerticalScrollBarVisibility="Auto"
+                                  HorizontalScrollBarVisibility="Disabled">
+                        <Grid MaxWidth="1080"
+                              Margin="26,18,26,28"
+                              ColumnSpacing="18">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.02*" />
+                                <ColumnDefinition Width="0.98*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0"
+                                    Padding="28"
+                                    CornerRadius="18"
+                                    Background="#101827"
+                                    BorderBrush="#22304A"
+                                    BorderThickness="1">
+                                <StackPanel Spacing="18">
+                                    <StackPanel Spacing="7">
+                                        <TextBlock Text="Private calls without the clutter"
+                                                   FontSize="30"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="#F8FAFC"
+                                                   TextWrapping="Wrap" />
+                                        <TextBlock Text="Join with a link or create a new room. Your saved rooms stay on this PC."
+                                                   FontSize="14"
+                                                   Foreground="#9FB0C8"
+                                                   TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <StackPanel Spacing="10">
+                                        <TextBlock Text="Room link"
+                                                   FontSize="12"
+                                                   Foreground="#91A3BD" />
+                                        <TextBox x:Name="RoomUrlInput"
+                                                 Height="46"
+                                                 PlaceholderText="Paste a call link or room ID"
+                                                 PlaceholderForeground="#74849C"
+                                                 Background="#0A1020"
+                                                 Foreground="#F8FAFC"
+                                                 BorderBrush="#2D3A51"
+                                                 CornerRadius="11"
+                                                 Padding="13,10" />
+                                    </StackPanel>
+
+                                    <Grid ColumnSpacing="10">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="1.25*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button x:Name="JoinButton"
+                                                Grid.Column="0"
+                                                Content="Join call"
+                                                Height="44"
+                                                Background="#2563EB"
+                                                Foreground="White"
+                                                CornerRadius="11"
+                                                Padding="22,10"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnJoinClick" />
+                                        <Button x:Name="CreateRoomButton"
+                                                Grid.Column="1"
+                                                Content="New room"
+                                                Height="44"
+                                                Background="#172235"
+                                                Foreground="#F8FAFC"
+                                                BorderBrush="#2D3A51"
+                                                CornerRadius="11"
+                                                Padding="18,10"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnCreateRoomClick" />
+                                    </Grid>
+
+                                    <Border Background="#0C1423"
+                                            CornerRadius="14"
+                                            Padding="15"
+                                            BorderBrush="#1C2A40"
+                                            BorderThickness="1">
+                                        <Grid ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="38"
+                                                    Height="38"
+                                                    CornerRadius="12"
+                                                    Background="#14213A">
+                                                <TextBlock Text="●"
+                                                           FontSize="13"
+                                                           Foreground="#4ADE80"
+                                                           HorizontalAlignment="Center"
+                                                           VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1"
+                                                        Spacing="2"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Ready for a call"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#E8EEF8" />
+                                                <TextBlock Text="Camera and microphone follow your saved Windows preferences."
+                                                           FontSize="12"
+                                                           Foreground="#8394AD"
+                                                           TextWrapping="Wrap" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </Border>
+
+                                    <Button Content="Settings"
+                                            Background="Transparent"
+                                            Foreground="#B9C6D8"
+                                            BorderBrush="#2D3A51"
+                                            CornerRadius="10"
+                                            Padding="18,9"
+                                            HorizontalAlignment="Left"
+                                            Click="OnSettingsClick" />
+
+                                    <TextBlock x:Name="StatusLabel"
+                                               Text=""
+                                               FontSize="13"
+                                               Foreground="#D5DEEA"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Border>
+
+                            <Border Grid.Column="1"
+                                    Padding="22"
+                                    CornerRadius="18"
+                                    Background="#0E1625"
+                                    BorderBrush="#22304A"
+                                    BorderThickness="1">
+                                <Grid RowSpacing="16">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Saved rooms"
+                                                       Foreground="#F8FAFC"
+                                                       FontSize="21"
+                                                       FontWeight="SemiBold" />
+                                            <TextBlock Text="Fast access to the rooms you use most."
+                                                       Foreground="#8394AD"
+                                                       FontSize="12" />
+                                        </StackPanel>
+                                        <Border Grid.Column="1"
+                                                Background="#14213A"
+                                                CornerRadius="10"
+                                                Padding="10,5"
+                                                VerticalAlignment="Center">
+                                            <TextBlock x:Name="SavedRoomsCountText"
+                                                       Text="0 rooms"
+                                                       FontSize="12"
+                                                       Foreground="#AFC1DA" />
+                                        </Border>
+                                    </Grid>
+
+                                    <Border Grid.Row="1"
+                                            Background="#0A1020"
+                                            BorderBrush="#1F2A3D"
+                                            BorderThickness="1"
+                                            CornerRadius="14"
+                                            Padding="13">
+                                        <StackPanel Spacing="10">
+                                            <TextBox x:Name="SavedRoomNameInput"
+                                                     Height="42"
+                                                     PlaceholderText="Name this room"
+                                                     PlaceholderForeground="#74849C"
+                                                     MaxLength="120"
+                                                     Background="#0E1625"
+                                                     Foreground="#F8FAFC"
+                                                     BorderBrush="#293750"
+                                                     CornerRadius="10"
+                                                     Padding="12,8" />
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition />
+                                                    <ColumnDefinition />
+                                                </Grid.ColumnDefinitions>
+                                                <Button Grid.Column="0"
+                                                        Content="Save pasted room"
+                                                        Background="#172235"
+                                                        Foreground="#DDE6F3"
+                                                        BorderBrush="#2D3A51"
+                                                        CornerRadius="10"
+                                                        Padding="10,8"
+                                                        HorizontalAlignment="Stretch"
+                                                        Click="OnSaveRoomLinkClick" />
+                                                <Button x:Name="CreateSavedRoomButton"
+                                                        Grid.Column="1"
+                                                        Content="Create saved room"
+                                                        Background="#1D4ED8"
+                                                        Foreground="White"
+                                                        CornerRadius="10"
+                                                        Padding="10,8"
+                                                        HorizontalAlignment="Stretch"
+                                                        Click="OnCreateSavedRoomClick" />
+                                            </Grid>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Grid Grid.Row="2">
+                                        <TextBlock x:Name="SavedRoomsEmptyText"
+                                                   Text="No saved rooms yet. Create one above and it will appear here."
+                                                   Foreground="#718198"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   TextAlignment="Center"
+                                                   TextWrapping="Wrap"
+                                                   MaxWidth="280"
+                                                   Margin="20" />
+                                        <ScrollViewer MaxHeight="410"
+                                                      VerticalScrollBarVisibility="Auto"
+                                                      HorizontalScrollBarVisibility="Disabled">
+                                            <StackPanel x:Name="SavedRoomsList"
+                                                        Spacing="9" />
+                                        </ScrollViewer>
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
+                    </ScrollViewer>
+
+                    <Border x:Name="SettingsPanel"
+                            Visibility="Collapsed"
+                            Width="470"
+                            Padding="28"
+                            CornerRadius="18"
+                            Background="#101827"
+                            BorderBrush="#2B3A51"
+                            BorderThickness="1"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
+                        <ScrollViewer MaxHeight="690"
+                                      VerticalScrollBarVisibility="Auto"
+                                      HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Spacing="20">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Text="Settings"
+                                               Foreground="#F8FAFC"
+                                               FontSize="26"
+                                               FontWeight="SemiBold" />
+                                    <TextBlock Text="These preferences apply when you join the next call."
+                                               Foreground="#93A4BC"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Server host"
+                                               Foreground="#F8FAFC" />
+                                    <ComboBox x:Name="ServerHostInput"
+                                              IsEditable="True"
+                                              PlaceholderText="Server hostname"
+                                              Background="#0A1020"
+                                              Foreground="#F8FAFC"
+                                              BorderBrush="#2D3A51"
+                                              HorizontalAlignment="Stretch">
+                                        <ComboBoxItem Content="serenada.app" />
+                                        <ComboBoxItem Content="serenada-app.ru" />
+                                    </ComboBox>
+                                    <TextBlock Text="Choose Global, Russia, or type a custom Serenada host."
+                                               Foreground="#8394AD"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Display name"
+                                               Foreground="#F8FAFC" />
+                                    <TextBox x:Name="DisplayNameInput"
+                                             PlaceholderText="Your name"
+                                             PlaceholderForeground="#74849C"
+                                             MaxLength="80"
+                                             Background="#0A1020"
+                                             Foreground="#F8FAFC"
+                                             BorderBrush="#2D3A51"
+                                             CornerRadius="10"
+                                             Padding="12,10" />
+                                </StackPanel>
+
+                                <ToggleSwitch x:Name="StartWithMicrophoneToggle"
+                                              Header="Microphone on when joining"
+                                              Foreground="#F8FAFC"
+                                              IsOn="True" />
+
+                                <ToggleSwitch x:Name="StartWithCameraToggle"
+                                              Header="Camera on when joining"
+                                              Foreground="#F8FAFC"
+                                              IsOn="True" />
+
+                                <StackPanel Spacing="6">
+                                    <ToggleSwitch x:Name="FloatingBubbleToggle"
+                                                  Header="Floating Serenada button"
+                                                  Foreground="#F8FAFC" />
+                                    <TextBlock Text="Keeps a small always-on-top Serenada button on the desktop so you can return to the app quickly."
+                                               Margin="0,0,0,0"
+                                               Foreground="#8394AD"
+                                               FontSize="12"
+                                               TextWrapping="Wrap" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="8">
+                                    <TextBlock Text="Windows device permissions"
+                                               Foreground="#93A4BC" />
+                                    <Grid ColumnSpacing="12">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition />
+                                            <ColumnDefinition />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0"
+                                                Content="Microphone"
+                                                Background="#0A1020"
+                                                Foreground="#F8FAFC"
+                                                BorderBrush="#2D3A51"
+                                                CornerRadius="10"
+                                                Padding="12,9"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnMicrophonePrivacyClick" />
+                                        <Button Grid.Column="1"
+                                                Content="Camera"
+                                                Background="#0A1020"
+                                                Foreground="#F8FAFC"
+                                                BorderBrush="#2D3A51"
+                                                CornerRadius="10"
+                                                Padding="12,9"
+                                                HorizontalAlignment="Stretch"
+                                                Click="OnCameraPrivacyClick" />
+                                    </Grid>
+                                </StackPanel>
+
+                                <Button Content="Open diagnostic log folder"
+                                        Background="#0A1020"
+                                        Foreground="#F8FAFC"
+                                        BorderBrush="#2D3A51"
+                                        CornerRadius="10"
+                                        Padding="12,9"
+                                        HorizontalAlignment="Stretch"
+                                        Click="OnOpenLogsClick" />
+
+                                <TextBlock x:Name="SettingsStatusLabel"
+                                           Foreground="#FCA5A5"
+                                           TextWrapping="Wrap" />
+
+                                <Grid ColumnSpacing="12">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition />
+                                        <ColumnDefinition />
+                                    </Grid.ColumnDefinitions>
+                                    <Button Grid.Column="0"
+                                            Content="Cancel"
+                                            Background="#172235"
+                                            Foreground="#F8FAFC"
+                                            CornerRadius="10"
+                                            Padding="20,11"
+                                            HorizontalAlignment="Stretch"
+                                            Click="OnSettingsCancelClick" />
+                                    <Button x:Name="SettingsSaveButton"
+                                            Grid.Column="1"
+                                            Content="Save"
+                                            Background="#2563EB"
+                                            Foreground="White"
+                                            CornerRadius="10"
+                                            Padding="20,11"
+                                            HorizontalAlignment="Stretch"
+                                            Click="OnSettingsSaveClick" />
+                                </Grid>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Border>
+
+                    <Grid x:Name="CallPanel"
+                          Visibility="Collapsed" />
+                </Grid>
+            </Grid>
+        </Border>
     </Grid>
 </Window>
